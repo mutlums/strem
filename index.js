@@ -113,6 +113,15 @@ async function translateBlocks(blocks, config) {
 function buildSRT(blocks) {
   return blocks.map(b => `${b.id}\n${b.time}\n${b.text}`).join('\n\n');
 }
+app.get('/', (req, res) => {
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.send('<html><body><h2>Addon çalışıyor</h2><p><a href="/manifest.json">manifest.json</a></p></body></html>');
+});
+
+app.get('/configure', (req, res) => {
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.send('<html><body><h2>Addon çalışıyor</h2><p><a href="/manifest.json">manifest.json</a></p></body></html>');
+});
 
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
