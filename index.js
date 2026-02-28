@@ -6,7 +6,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-const PORT = process.env.PORT || 7000;
+const PORT = process.env.PORT || 10000;
 const cache = new Map();
 
 const manifest = {
