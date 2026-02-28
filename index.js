@@ -113,14 +113,9 @@ async function translateBlocks(blocks, config) {
 function buildSRT(blocks) {
   return blocks.map(b => `${b.id}\n${b.time}\n${b.text}`).join('\n\n');
 }
-app.get('/', (req, res) => {
+app.get('/:config/configure', (req, res) => {
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
-  res.send('<html><body><h2>Addon çalışıyor</h2><p><a href="/manifest.json">manifest.json</a></p></body></html>');
-});
-
-app.get('/configure', (req, res) => {
-  res.setHeader('Content-Type', 'text/html; charset=utf-8');
-  res.send('<html><body><h2>Addon çalışıyor</h2><p><a href="/manifest.json">manifest.json</a></p></body></html>');
+  res.send('<html><body style="background:#111;color:#fff;font-family:sans-serif;padding:30px;text-align:center"><h2>✅ Addon Kuruldu!</h2><p>Altyazi menusunden <b>Turkce (AI)</b> seceneğini sec.</p></body></html>');
 });
 
 app.listen(PORT, () => {
