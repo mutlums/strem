@@ -1,7 +1,0 @@
-services:
-  - type: web
-    name: stremio-en-tr
-    env: node
-    buildCommand: npm install
-    startCommand: node index.js
-    healthCheckPath: /manifest.json
