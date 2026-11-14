@@ -61,6 +61,18 @@ ikinci kez anında gelir.
 Çeviri çok uzun sürerse (varsayılan 100 sn) o ana kadar çevrilen kısım Türkçe, kalanı
 orijinal haliyle gelir; birkaç dakika sonra altyazıyı yeniden seçince tamamı gelir.
 
+## Kore filmleri ve dizileri için kültür modu
+
+Ayar sayfasındaki **Kore yapımları için kültür modu** varsayılan olarak **Otomatik**: içerik Güney Kore
+yapımıysa (bilgi Stremio/Nuvio'nun kullandığı Cinemeta'dan alınır) çeviri şöyle değişir:
+
+- Varsa önce **Korece** altyazıdan çevirir; İngilizce altyazılarda hitaplar genelde kaybolur.
+- **Hitaplar** (Oppa, Hyung, Unnie, Noona, Sunbae, Ajumma, Seonsaengnim, -ssi, -nim) olduğu gibi kalır.
+  İstersen "Türkçeleştir" seçeneğiyle abi, abla, hocam, Bey/Hanım şeklinde çevrilir.
+- **Sen/siz** ayrımı Korecedeki konuşma düzeyine göre yapılır (büyüklere, üstlere, yabancılara "siz").
+- Soju, kimchi, ramyeon, hanbok, chaebol gibi kelimeler Türkçe karşılıklarla değiştirilmez.
+- Kore isimleri kaynaktaki gibi (soyadı önce) kalır.
+
 ## Sorun giderme
 
 - **Altyazı listesinde hiç Türkçe seçenek yok:** O içerik için OpenSubtitles'ta İngilizce altyazı

@@ -23,7 +23,19 @@ const get = async (url) => {
 
 test('full flow: manifest -> subtitles list -> translated .srt', async (t) => {
   let geminiCalls = 0;
+  const systemPrompts = [];
   const source = await listen((req, res) => {
+    // fake Cinemeta
+    if (req.url === '/meta/movie/tt6751668.json') return res.end(JSON.stringify({ meta: { name: 'Parasite', country: 'South Korea' } }));
+    if (req.url.startsWith('/meta/')) return res.end(JSON.stringify({ meta: { country: 'United States' } }));
+    if (req.url.startsWith('/subtitles/movie/tt6751668')) {
+      const base = `http://127.0.0.1:${portOf(source)}`;
+      res.setHeader('Content-Type', 'application/json');
+      return res.end(JSON.stringify({ subtitles: [
+        { id: 'e1', url: `${base}/file/en.srt`, lang: 'eng' },
+        { id: 'k1', url: `${base}/file/ko.srt`, lang: 'kor' },
+      ] }));
+    }
     if (req.url.startsWith('/subtitles/movie/tt0111161')) {
       const base = `http://127.0.0.1:${portOf(source)}`;
       res.setHeader('Content-Type', 'application/json');
@@ -46,6 +58,7 @@ test('full flow: manifest -> subtitles list -> translated .srt', async (t) => {
       assert.strictEqual(req.headers['x-goog-api-key'], 'TEST-KEY');
       assert.match(req.url, /\/models\/gemini-3\.5-flash-lite:generateContent$/);
       const parsed = JSON.parse(body);
+      systemPrompts.push(parsed.systemInstruction.parts[0].text);
       const input = JSON.parse(parsed.contents[0].parts[0].text);
       assert.strictEqual(input.target_language, 'Turkish');
       const lines = input.lines.map((l) => ({ id: l.id, text: `[TR] ${l.text}` }));
@@ -59,6 +72,7 @@ test('full flow: manifest -> subtitles list -> translated .srt', async (t) => {
   process.env.GEMINI_BASE_URL = `http://127.0.0.1:${portOf(gemini)}`;
   process.env.CACHE_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'subcache-'));
   process.env.PREWARM = 'false';
+  process.env.CINEMETA_URL = `http://127.0.0.1:${portOf(source)}`;
   const { createServer } = require('../src/server');
   const { encodeConfig } = require('../src/config');
   const addon = await listen(createServer().listeners('request')[0]);
@@ -103,7 +117,33 @@ test('full flow: manifest -> subtitles list -> translated .srt', async (t) => {
   const s = JSON.parse((await get(`${A}/${cfg}/subtitles/series/tt0903747:1:1.json`)).text);
   assert.deepStrictEqual(s.subtitles, []);
 
-  // configure page renders
+  // the non-Korean film used the standard prompt
+  assert.ok(systemPrompts.length > 0 && systemPrompts.every((p) => !/South Korean/.test(p)));
+
+  // Korean film: auto-detected, Korean subtitle offered first, Korean culture prompt used
+  const kr = JSON.parse((await get(`${A}/${cfg}/subtitles/movie/tt6751668.json`)).text).subtitles;
+  assert.strictEqual(kr.length, 2);
+  assert.match(kr[0].url, /\/translate\/kr\//);
+  const firstSrc = Buffer.from(kr[0].url.split('/translate/kr/')[1].replace(/\.srt$/, ''), 'base64url').toString();
+  assert.match(firstSrc, /ko\.srt$/, 'Korean source preferred for Korean titles');
+  const before = systemPrompts.length;
+  const krSrt = await get(kr[0].url);
+  assert.strictEqual(krSrt.status, 200);
+  const krPrompts = systemPrompts.slice(before);
+  assert.ok(krPrompts.length > 0 && krPrompts.every((p) => /South Korean/.test(p) && /Oppa, Hyung, Unnie/.test(p) && /"siz"/.test(p)));
+
+  // hon=tr switches honorifics to Turkish equivalents; kr=off disables the mode
+  const cfgTr = encodeConfig({ key: 'TEST-KEY', hon: 'tr' });
+  const krTr = JSON.parse((await get(`${A}/${cfgTr}/subtitles/movie/tt6751668.json`)).text).subtitles;
+  const b2 = systemPrompts.length;
+  await get(krTr[0].url);
+  assert.ok(systemPrompts.slice(b2).every((p) => /Oppa\/Hyung -> abi/.test(p)));
+  const cfgOff = encodeConfig({ key: 'TEST-KEY', kr: 'off' });
+  const off = JSON.parse((await get(`${A}/${cfgOff}/subtitles/movie/tt6751668.json`)).text).subtitles;
+  assert.match(off[0].url, /\/translate\/std\//);
+
+  // configure page renders, with the Korean options
   const page = await get(`${A}/configure`);
   assert.match(page.text, /Gemini Altyazı Çevirmeni/);
+  assert.match(page.text, /Kore hitapları/);
 });

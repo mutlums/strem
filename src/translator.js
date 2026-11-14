@@ -29,8 +29,8 @@ const RESPONSE_SCHEMA = {
   required: ['lines'],
 };
 
-function systemPrompt(targetName) {
-  return [
+function systemPrompt(targetName, extra = '') {
+  const base = [
     `You are a professional subtitle translator. Translate every subtitle line into ${targetName}.`,
     'Rules:',
     '- Return exactly one item per input line, with the same id. Never merge, split, skip or reorder lines.',
@@ -41,13 +41,14 @@ function systemPrompt(targetName) {
     '- Lines that only contain music symbols or are already in the target language stay unchanged.',
     '- The "context" lines are earlier dialogue for reference only. Do not translate or return them.',
   ].join('\n');
+  return extra ? `${base}\n\n${extra}` : base;
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-async function callGemini({ apiKey, model, targetName, items, context, fetchImpl = fetch, baseUrl = GEMINI_BASE_URL, retries = 4 }) {
+async function callGemini({ apiKey, model, targetName, items, context, extra = '', fetchImpl = fetch, baseUrl = GEMINI_BASE_URL, retries = 4 }) {
   const body = {
-    systemInstruction: { parts: [{ text: systemPrompt(targetName) }] },
+    systemInstruction: { parts: [{ text: systemPrompt(targetName, extra) }] },
     contents: [
       {
         role: 'user',
@@ -154,6 +155,7 @@ async function translateTexts(texts, opts) {
     fetchImpl,
     baseUrl,
     retries,
+    extra = '',
   } = opts;
 
   const result = texts.slice();
@@ -163,7 +165,7 @@ async function translateTexts(texts, opts) {
     const items = indices.map((i) => ({ id: i, text: texts[i] }));
     const first = indices[0];
     const context = texts.slice(Math.max(0, first - contextLines), first);
-    const got = await callGemini({ apiKey, model, targetName, items, context, fetchImpl, baseUrl, retries });
+    const got = await callGemini({ apiKey, model, targetName, items, context, extra, fetchImpl, baseUrl, retries });
     const missing = indices.filter((i) => !got.has(i) || !got.get(i).trim());
     for (const i of indices) {
       if (got.has(i) && got.get(i).trim()) {
@@ -189,7 +191,7 @@ async function translateTexts(texts, opts) {
   }
 
   async function runSingle(i) {
-    const got = await callGemini({ apiKey, model, targetName, items: [{ id: i, text: texts[i] }], context: [], fetchImpl, baseUrl, retries });
+    const got = await callGemini({ apiKey, model, targetName, items: [{ id: i, text: texts[i] }], context: [], extra, fetchImpl, baseUrl, retries });
     if (got.has(i) && got.get(i).trim()) {
       result[i] = got.get(i);
       onProgress(i, result[i]);

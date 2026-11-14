@@ -8,6 +8,7 @@ const { decodeConfig, encodeConfig, DEFAULT_MODEL } = require('./config');
 const { languageName, LANGUAGES } = require('./languages');
 const { Cache } = require('./cache');
 const { configurePage } = require('./configure');
+const { styleInstructions } = require('./styles');
 const pkg = require('../package.json');
 
 const PORT = parseInt(process.env.PORT, 10) || 7000;
@@ -19,6 +20,7 @@ const PREWARM = process.env.PREWARM !== 'false';
 const SERVER_KEY = process.env.GEMINI_API_KEY || '';
 const ADDON_PASSWORD = process.env.ADDON_PASSWORD || '';
 const CONCURRENCY = parseInt(process.env.GEMINI_CONCURRENCY, 10) || 2;
+const CINEMETA = (process.env.CINEMETA_URL || 'https://v3-cinemeta.strem.io').replace(/\/$/, '');
 
 const cache = new Cache();
 const jobs = new Map(); // cacheKey -> job
@@ -89,12 +91,33 @@ async function fetchText(url, timeoutMs = 20000) {
 
 // ---- translation jobs -------------------------------------------------------
 
-function cacheKey(srcUrl, cfg) {
-  return crypto.createHash('sha1').update(`${srcUrl}|${cfg.lang}|${cfg.model}|v1`).digest('hex');
+function cacheKey(srcUrl, cfg, style) {
+  const styleKey = style === 'kr' ? `kr-${cfg.hon}` : 'std';
+  return crypto.createHash('sha1').update(`${srcUrl}|${cfg.lang}|${cfg.model}|${styleKey}|v2`).digest('hex');
 }
 
-function startJob(srcUrl, cfg, apiKey) {
-  const key = cacheKey(srcUrl, cfg);
+// Is this title South Korean? Uses Cinemeta (the metadata addon Stremio/Nuvio use). Cached per title.
+const originCache = new Map();
+async function isKoreanTitle(type, id) {
+  const imdb = id.split(':')[0];
+  const key = `${type}/${imdb}`;
+  if (originCache.has(key)) return originCache.get(key);
+  let korean = false;
+  try {
+    const meta = JSON.parse(await fetchText(`${CINEMETA}/meta/${type}/${imdb}.json`, 6000)).meta || {};
+    const country = Array.isArray(meta.country) ? meta.country.join(',') : String(meta.country || '');
+    korean = /south korea|republic of korea|(^|,)\s*korea\s*(,|$)/i.test(country);
+  } catch (err) {
+    console.warn('cinemeta lookup failed:', err.message);
+    return false; // don't cache failures
+  }
+  originCache.set(key, korean);
+  if (originCache.size > 2000) originCache.delete(originCache.keys().next().value);
+  return korean;
+}
+
+function startJob(srcUrl, cfg, apiKey, style = 'std') {
+  const key = cacheKey(srcUrl, cfg, style);
   if (jobs.has(key)) return jobs.get(key);
   const job = { key, cues: null, translated: null, done: false, error: null };
   job.promise = (async () => {
@@ -114,6 +137,7 @@ function startJob(srcUrl, cfg, apiKey) {
         concurrency: CONCURRENCY,
         batchSize: parseInt(process.env.GEMINI_BATCH_SIZE, 10) || 100,
         batchChars: 7000,
+        extra: styleInstructions(style, { honorifics: cfg.hon }),
         onProgress: (i, t) => {
           job.translated[i] = t;
         },
@@ -159,9 +183,14 @@ async function handleSubtitles(req, res, cfgStr, cfg, type, id, extra) {
     return send(res, 200, { subtitles: [] });
   }
 
+  const korean = cfg.kr === 'on' || (cfg.kr === 'auto' && (await isKoreanTitle(type, id)));
+  const style = korean ? 'kr' : 'std';
+  // For Korean titles, translate from the Korean subtitle when there is one: English subs usually lose the honorifics.
+  const srcOrder = korean && cfg.lang !== 'kor' ? ['kor', ...cfg.src.filter((l) => l !== 'kor')] : cfg.src;
+
   const picked = [];
   const seen = new Set();
-  for (const lang of cfg.src) {
+  for (const lang of srcOrder) {
     for (const s of list) {
       if (picked.length >= cfg.max) break;
       if (s.lang !== lang || !s.url || seen.has(s.url) || !isAllowedSubUrl(s.url)) continue;
@@ -173,16 +202,16 @@ async function handleSubtitles(req, res, cfgStr, cfg, type, id, extra) {
   const base = baseUrl(req);
   const subtitles = picked.map((s, n) => ({
     id: `gemini-${cfg.lang}-${s.id || n}`,
-    url: `${base}/${cfgStr}/translate/${Buffer.from(s.url).toString('base64url')}.srt`,
+    url: `${base}/${cfgStr}/translate/${style}/${Buffer.from(s.url).toString('base64url')}.srt`,
     lang: cfg.lang,
   }));
 
-  if (PREWARM && apiKey && picked[0]) startJob(picked[0].url, cfg, apiKey);
-  console.log(`subtitles ${type}/${id}: ${list.length} source, ${subtitles.length} offered`);
+  if (PREWARM && apiKey && picked[0]) startJob(picked[0].url, cfg, apiKey, style);
+  console.log(`subtitles ${type}/${id}: ${list.length} source, ${subtitles.length} offered, style=${style}, from=${picked.map((p) => p.lang).join(',')}`);
   return send(res, 200, { subtitles, cacheMaxAge: 3600 });
 }
 
-async function handleTranslate(req, res, cfg, encodedUrl) {
+async function handleTranslate(req, res, cfg, encodedUrl, style = 'std') {
   const srt = (body, extra = {}) => send(res, 200, body, 'application/x-subrip; charset=utf-8', extra);
   let srcUrl;
   try {
@@ -195,7 +224,7 @@ async function handleTranslate(req, res, cfg, encodedUrl) {
   const apiKey = resolveApiKey(cfg);
   if (!apiKey) return srt(errorSrt('Gemini API anahtarı yok. Eklentiyi ayar sayfasından yeniden kur.'), { 'Cache-Control': 'no-store' });
 
-  const job = startJob(srcUrl, cfg, apiKey);
+  const job = startJob(srcUrl, cfg, apiKey, style === 'kr' ? 'kr' : 'std');
   let timer;
   const timeout = new Promise((resolve) => {
     timer = setTimeout(() => resolve(null), WAIT_MS);
@@ -288,6 +317,7 @@ async function router(req, res) {
     return handleSubtitles(req, res, cfgStr, cfg, type, id, extra);
   }
 
+  if (rest[0] === 'translate' && rest.length === 3) return handleTranslate(req, res, cfg, rest[2].replace(/\.srt$/, ''), rest[1]);
   if (rest[0] === 'translate' && rest[1]) return handleTranslate(req, res, cfg, rest[1].replace(/\.srt$/, ''));
 
   return send(res, 404, { error: 'not found' });

@@ -11,7 +11,7 @@ const MODELS = [
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 function configurePage({ cfg, serverKey, needsPassword, defaultModel }) {
-  const cur = cfg || { lang: 'tur', model: defaultModel, src: ['eng'], max: 2 };
+  const cur = cfg || { lang: 'tur', model: defaultModel, src: ['eng'], max: 2, kr: 'auto', hon: 'keep' };
   const langOptions = Object.entries(LANGUAGES)
     .map(([code, l]) => `<option value="${code}"${code === cur.lang ? ' selected' : ''}>${esc(l.label)} (${code})</option>`)
     .join('');
@@ -74,6 +74,20 @@ function configurePage({ cfg, serverKey, needsPassword, defaultModel }) {
     <select id="max">${[1, 2, 3].map((n) => `<option${n === cur.max ? ' selected' : ''}>${n}</option>`).join('')}</select>
     <small>Her seçenek farklı bir kaynak altyazının çevirisi. Yalnızca seçtiğin çevrilir (ilki arka planda hazırlanmaya başlar).</small>
 
+    <label for="kr">Kore yapımları için kültür modu</label>
+    <select id="kr">
+      <option value="auto"${cur.kr === 'auto' || !cur.kr ? ' selected' : ''}>Otomatik (Güney Kore yapımı film ve dizilerde açılır)</option>
+      <option value="on"${cur.kr === 'on' ? ' selected' : ''}>Her zaman açık</option>
+      <option value="off"${cur.kr === 'off' ? ' selected' : ''}>Kapalı</option>
+    </select>
+    <small>Açıkken önce Korece altyazıdan çevirir, sen/siz ayrımını Korecedeki konuşma düzeyine göre yapar; soju, kimchi gibi kelimeleri korur.</small>
+
+    <label for="hon">Kore hitapları</label>
+    <select id="hon">
+      <option value="keep"${cur.hon !== 'tr' ? ' selected' : ''}>Olduğu gibi kalsın (Oppa, Hyung, Unnie, Sunbae, -ssi)</option>
+      <option value="tr"${cur.hon === 'tr' ? ' selected' : ''}>Türkçeleştir (abi, abla, hocam, Bey/Hanım)</option>
+    </select>
+
     <button class="secondary" id="test">Anahtarı dene</button>
     <div class="msg" id="testMsg"></div>
     <button class="primary" id="make">Eklenti linkini oluştur</button>
@@ -92,7 +106,7 @@ function configurePage({ cfg, serverKey, needsPassword, defaultModel }) {
   $('model').addEventListener('change', () => { $('modelCustom').style.display = $('model').value === '__custom' ? 'block' : 'none'; });
   function readCfg() {
     const model = $('model').value === '__custom' ? $('modelCustom').value.trim() : $('model').value;
-    const cfg = { key: $('key').value.trim(), lang: $('lang').value, model, src: $('src').value.trim() || 'eng', max: Number($('max').value) };
+    const cfg = { key: $('key').value.trim(), lang: $('lang').value, model, src: $('src').value.trim() || 'eng', max: Number($('max').value), kr: $('kr').value, hon: $('hon').value };
     if ($('pass')) cfg.pass = $('pass').value;
     return cfg;
   }

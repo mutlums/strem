@@ -12,6 +12,8 @@ const DEFAULTS = {
   model: DEFAULT_MODEL,
   src: ['eng'], // source languages to translate from, in priority order
   max: 2, // how many translated options to list per video
+  kr: 'auto', // Korean culture mode: auto (South Korean titles) | on | off
+  hon: 'keep', // Korean honorifics: keep (Oppa, Hyung...) | tr (abi, abla...)
 };
 
 function encodeConfig(cfg) {
@@ -31,6 +33,8 @@ function sanitize(raw) {
     const list = src.map((s) => String(s).trim().toLowerCase()).filter((s) => /^[a-z]{2,3}$/.test(s));
     if (list.length) cfg.src = list.slice(0, 5);
   }
+  if (['auto', 'on', 'off'].includes(raw.kr)) cfg.kr = raw.kr;
+  if (['keep', 'tr'].includes(raw.hon)) cfg.hon = raw.hon;
   const max = parseInt(raw.max, 10);
   if (max >= 1 && max <= 5) cfg.max = max;
   return cfg;
