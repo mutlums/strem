@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: gemini-altyazi-cevirmeni
+    branch: nuvio-altyazi-cevirmeni
+    runtime: node
+    plan: free
+    buildCommand: echo "no build needed"
+    startCommand: node src/server.js
+    healthCheckPath: /health

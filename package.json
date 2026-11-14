@@ -1,0 +1,14 @@
+{
+  "name": "nuvio-gemini-subtitle-translator",
+  "version": "1.0.0",
+  "description": "Stremio/Nuvio subtitles addon that translates existing subtitles with Google Gemini (default: Turkish).",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=18.17"
+  },
+  "license": "MIT"
+}
