@@ -74,6 +74,12 @@ yapımıysa (bilgi Stremio/Nuvio'nun kullandığı Cinemeta'dan alınır) çevir
 - Soju, kimchi, ramyeon, hanbok, chaebol gibi kelimeler Türkçe karşılıklarla değiştirilmez.
 - Kore isimleri kaynaktaki gibi (soyadı önce) kalır.
 
+## Senkron: videoya uyan altyazıyı seçme
+
+Bir altyazı eklentisi videonun kendisini görmez; oynatıcı sadece dizinin kimliğini, dosya adını ve (varsa) dosyanın OpenSubtitles parmak izini (videoHash) gönderir. Bu yüzden videonun içine gömülü altyazıyı okuyup çeviremez.
+
+Bunun yerine eklenti, kaynak listesinden bu dosya için yapılmış altyazıyı öne alır: önce parmak izi tutanı, sonra aynı yayın grubu, kaynak (WEB-DL, HDTV, BluRay) ve çözünürlükte olanı. Bilgi yoksa eski dil sırası geçerlidir. Küçük kaymalar için oynatıcının altyazı gecikmesi ayarını kullanabilirsin.
+
 ## Sorun giderme
 
 - **Altyazı listesinde hiç Türkçe seçenek yok:** O içerik için OpenSubtitles'ta İngilizce altyazı

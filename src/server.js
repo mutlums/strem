@@ -1,6 +1,7 @@
 'use strict';
 
 const http = require('http');
+const { parseExtra, rankForSync } = require('./match');
 const crypto = require('crypto');
 const { parseSrt, serializeSrt } = require('./srt');
 const { translateTexts } = require('./translator');
@@ -196,16 +197,8 @@ async function handleSubtitles(req, res, cfgStr, cfg, type, id, extra) {
   // For Korean titles, translate from the Korean subtitle when there is one: English subs usually lose the honorifics.
   const srcOrder = korean && cfg.lang !== 'kor' ? ['kor', ...cfg.src.filter((l) => l !== 'kor')] : cfg.src;
 
-  const picked = [];
-  const seen = new Set();
-  for (const lang of srcOrder) {
-    for (const s of list) {
-      if (picked.length >= cfg.max) break;
-      if (s.lang !== lang || !s.url || seen.has(s.url) || !isAllowedSubUrl(s.url)) continue;
-      seen.add(s.url);
-      picked.push(s);
-    }
-  }
+  // Prefer the subtitle made for this exact file (hash match) or the same release (filename), so it stays in sync.
+  const picked = rankForSync(list, srcOrder, parseExtra(extra), isAllowedSubUrl).slice(0, cfg.max);
 
   const base = baseUrl(req);
   const subtitles = picked.map((s, n) => ({
@@ -215,7 +208,7 @@ async function handleSubtitles(req, res, cfgStr, cfg, type, id, extra) {
   }));
 
   if (PREWARM && apiKey && picked[0]) startJob(picked[0].url, cfg, apiKey, style);
-  console.log(`subtitles ${type}/${id}: ${list.length} source, ${subtitles.length} offered, style=${style}, from=${picked.map((p) => p.lang).join(',')}`);
+  console.log(`subtitles ${type}/${id}: ${list.length} source, ${subtitles.length} offered, style=${style}, from=${picked.map((p) => `${p.lang}:${p._sync}`).join(',')}`);
   return send(res, 200, { subtitles, cacheMaxAge: 3600 });
 }
 
