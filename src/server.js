@@ -82,6 +82,9 @@ function send(res, status, body, type = 'application/json; charset=utf-8', extra
 const SETUP_MESSAGE =
   'Eklenti ayarsız kurulmuş. Ayar sayfasında (/configure) Gemini anahtarınla link oluştur ve eklentiyi o linkle yeniden ekle.';
 
+const STALE_MESSAGE =
+  'Bu eski, önbellekte kalmış bir altyazı. Eklenti artık hazır: bölümü kapatıp yeniden aç ve listeden diğer Türkçe (Gemini) altyazıyı seç.';
+
 function errorSrt(message) {
   return serializeSrt([
     { start: '00:00:01,000', end: '09:59:59,000', text: `Gemini Altyazı Çevirmeni: ${message}` },
@@ -317,7 +320,9 @@ async function router(req, res) {
     });
   }
   if (parts[0] === 'setup-needed.srt') {
-    return send(res, 200, errorSrt(SETUP_MESSAGE), 'application/x-subrip; charset=utf-8', { 'Cache-Control': 'no-store' });
+    // With a server key this link is only reached from an old answer a proxy (e.g. AIOStreams) still holds in its cache.
+    const msg = SERVER_KEY && !ADDON_PASSWORD ? STALE_MESSAGE : SETUP_MESSAGE;
+    return send(res, 200, errorSrt(msg), 'application/x-subrip; charset=utf-8', { 'Cache-Control': 'no-store' });
   }
 
   const cfgStr = parts[0];
