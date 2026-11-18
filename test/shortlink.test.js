@@ -35,4 +35,9 @@ test('short link uses the server key and default settings', async (t) => {
   assert.ok(subs.subtitles.length >= 1, 'offers a translated subtitle');
   assert.ok(subs.subtitles.every((s) => !s.url.includes('setup-needed')), 'no setup hint');
   assert.ok(subs.subtitles[0].url.includes('/translate/'), 'points at the translate route');
+
+  const man2 = await (await fetch(`${base}/tr/manifest.json`)).json();
+  assert.strictEqual(man2.behaviorHints.configurationRequired, false);
+  const subs2 = await (await fetch(`${base}/tr/subtitles/movie/tt0111161.json`)).json();
+  assert.ok(subs2.subtitles.length >= 1 && subs2.subtitles[0].url.includes('/translate/'), '/tr alias works');
 });

@@ -296,6 +296,11 @@ async function router(req, res) {
     rawParts.unshift(SHORT_LINK_CFG);
     parts.unshift(SHORT_LINK_CFG);
   }
+  // /tr/manifest.json: same as the short link, under a fresh URL (helps when a proxy like AIOStreams cached old answers).
+  if (SERVER_KEY && !ADDON_PASSWORD && parts[0] === 'tr' && parts.length > 1) {
+    rawParts[0] = SHORT_LINK_CFG;
+    parts[0] = SHORT_LINK_CFG;
+  }
 
   if (parts.length === 0) return send(res, 302, '', 'text/plain', { Location: '/configure' });
   if (parts[0] === 'health') return send(res, 200, { ok: true, version: pkg.version });
