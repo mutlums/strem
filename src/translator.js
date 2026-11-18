@@ -46,10 +46,15 @@ function systemPrompt(targetName, extra = '') {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// Pace requests per API key: Gemini's free tier allows only ~15 requests per minute,
-// and several translations (both list options, a prewarm, other users of the same key) can run at once.
-const DEFAULT_RPM = process.env.GEMINI_RPM !== undefined ? parseInt(process.env.GEMINI_RPM, 10) || 0 : 12;
-const recentCalls = new Map(); // api key -> timestamps of recent requests
+// Pace requests per API key and model: Gemini's free tier allows only a few requests per minute
+// (Flash-Lite more than Flash), and several translations (both list options, a prewarm,
+// other users of the same key) can run at once. GEMINI_RPM overrides it (0 = no pacing).
+const ENV_RPM = process.env.GEMINI_RPM !== undefined ? parseInt(process.env.GEMINI_RPM, 10) || 0 : undefined;
+function defaultRpm(model) {
+  if (ENV_RPM !== undefined) return ENV_RPM;
+  return /lite/i.test(model || '') ? 12 : 8;
+}
+const recentCalls = new Map(); // api key + model -> timestamps of recent requests
 
 async function waitForSlot(apiKey, rpm) {
   if (!rpm) return;
@@ -78,7 +83,7 @@ function retryDelayMs(errBody, detail) {
   return m ? Math.ceil(parseFloat(m[1]) * 1000) : 0;
 }
 
-async function callGemini({ apiKey, model, targetName, items, context, extra = '', fetchImpl = fetch, baseUrl = GEMINI_BASE_URL, retries = 4, rpm = DEFAULT_RPM }) {
+async function callGemini({ apiKey, model, targetName, items, context, extra = '', fetchImpl = fetch, baseUrl = GEMINI_BASE_URL, retries = 4, rpm = defaultRpm(model) }) {
   const body = {
     systemInstruction: { parts: [{ text: systemPrompt(targetName, extra) }] },
     contents: [
@@ -99,7 +104,7 @@ async function callGemini({ apiKey, model, targetName, items, context, extra = '
   let rateWaits = 0;
   for (let attempt = 0; attempt <= retries; attempt++) {
     let res;
-    await waitForSlot(apiKey, rpm);
+    await waitForSlot(`${apiKey}|${model}`, rpm);
     try {
       res = await fetchImpl(url, {
         method: 'POST',

@@ -7,7 +7,7 @@ başka bir dile) çevirir ve altyazı listesine "Türkçe" seçeneği olarak ekl
 - Zamanlamalar ve satır numaraları modele hiç gitmez, sadece metin çevrilir; senkron bozulmaz.
 - `<i>`, `{\an8}` gibi biçim etiketleri korunur.
 - Çeviriler önbelleğe alınır: aynı altyazı ikinci kez çevrilmez, API'yi boşa harcamaz.
-- Kendi Gemini API anahtarınla çalışır. Varsayılan model `gemini-3.5-flash-lite` (ucuz ve hızlı).
+- Kendi Gemini API anahtarınla çalışır. Varsayılan model `gemini-3.6-flash` (daha kaliteli çeviri). Daha hızlı ve ücretsiz kotası daha geniş olan `gemini-3.5-flash-lite` ayar sayfasından seçilebilir; sunucuda `GEMINI_MODEL` ortam değişkeniyle varsayılan değiştirilebilir.
 - Hiçbir npm paketi gerekmez, Node.js 18 veya üstü yeterli.
 
 ## 1. Ücretsiz Gemini API anahtarı al

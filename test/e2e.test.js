@@ -56,7 +56,7 @@ test('full flow: manifest -> subtitles list -> translated .srt', async (t) => {
     req.on('end', () => {
       geminiCalls++;
       assert.strictEqual(req.headers['x-goog-api-key'], 'TEST-KEY');
-      assert.match(req.url, /\/models\/gemini-3\.5-flash-lite:generateContent$/);
+      assert.match(req.url, /\/models\/gemini-3\.(5-flash-lite|6-flash):generateContent$/);
       const parsed = JSON.parse(body);
       systemPrompts.push(parsed.systemInstruction.parts[0].text);
       const input = JSON.parse(parsed.contents[0].parts[0].text);

@@ -3,7 +3,9 @@
 // User config lives in the addon URL (Stremio convention), base64url-encoded JSON:
 //   https://your-host/<config>/manifest.json
 
-const DEFAULT_MODEL = 'gemini-3.5-flash-lite';
+// Flash translates better (honorifics, idioms); Flash-Lite is faster with a larger free quota.
+// GEMINI_MODEL on the server changes the default, which the short link (/tr) uses.
+const DEFAULT_MODEL = (process.env.GEMINI_MODEL || 'gemini-3.6-flash').trim();
 
 const DEFAULTS = {
   key: '', // Gemini API key (or empty when the server has GEMINI_API_KEY)

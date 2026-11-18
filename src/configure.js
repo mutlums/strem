@@ -3,9 +3,9 @@
 const { LANGUAGES } = require('./languages');
 
 const MODELS = [
-  ['gemini-3.5-flash-lite', 'gemini-3.5-flash-lite (önerilen, ucuz ve hızlı)'],
+  ['gemini-3.6-flash', 'gemini-3.6-flash (önerilen, daha kaliteli çeviri)'],
+  ['gemini-3.5-flash-lite', 'gemini-3.5-flash-lite (daha hızlı, ücretsiz kotası daha geniş)'],
   ['gemini-3.1-flash-lite', 'gemini-3.1-flash-lite (daha eski flash-lite)'],
-  ['gemini-3.6-flash', 'gemini-3.6-flash (daha kaliteli, daha pahalı)'],
 ];
 
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
