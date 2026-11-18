@@ -336,8 +336,35 @@ async function router(req, res) {
   return send(res, 404, { error: 'not found' });
 }
 
+// Access log without secrets: the settings segment (which holds the Gemini key) is replaced by <cfg>.
+function redactPath(rawUrl) {
+  const pathname = String(rawUrl || '').split('?')[0];
+  const parts = pathname.split('/');
+  return parts
+    .map((p, i) => {
+      if (i === 1 && p && decodeConfig(safeDecode(p))) return '<cfg>';
+      if (i === 1 && p.length > 40) return '<bad-cfg>';
+      if (p.length > 40) return p.slice(0, 16) + '…';
+      return p;
+    })
+    .join('/');
+}
+function safeDecode(p) {
+  try {
+    return decodeURIComponent(p);
+  } catch (_) {
+    return p;
+  }
+}
+
 function createServer() {
   return http.createServer((req, res) => {
+    const t0 = Date.now();
+    res.on('finish', () => {
+      if (req.url === '/health') return;
+      const ua = String(req.headers['user-agent'] || '-').slice(0, 60);
+      console.log(`req ${req.method} ${redactPath(req.url)} -> ${res.statusCode} ${Date.now() - t0}ms ua="${ua}"`);
+    });
     router(req, res).catch((err) => {
       console.error(err);
       if (!res.headersSent) send(res, 500, { error: 'internal error' });
