@@ -82,7 +82,7 @@ const SETUP_MESSAGE =
 
 function errorSrt(message) {
   return serializeSrt([
-    { start: '00:00:01,000', end: '00:00:15,000', text: `Gemini Altyazı Çevirmeni: ${message}` },
+    { start: '00:00:01,000', end: '09:59:59,000', text: `Gemini Altyazı Çevirmeni: ${message}` },
   ]);
 }
 
