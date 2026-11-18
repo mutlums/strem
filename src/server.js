@@ -19,6 +19,8 @@ const WAIT_MS = parseInt(process.env.TRANSLATE_WAIT_MS, 10) || 100000;
 const PREWARM = process.env.PREWARM !== 'false';
 const SERVER_KEY = process.env.GEMINI_API_KEY || '';
 const ADDON_PASSWORD = process.env.ADDON_PASSWORD || '';
+// With GEMINI_API_KEY set and no ADDON_PASSWORD, the short link (no settings in the URL) uses default settings.
+const SHORT_LINK_CFG = encodeConfig({});
 const CONCURRENCY = parseInt(process.env.GEMINI_CONCURRENCY, 10) || 1;
 const CINEMETA = (process.env.CINEMETA_URL || 'https://v3-cinemeta.strem.io').replace(/\/$/, '');
 
@@ -290,6 +292,10 @@ async function router(req, res) {
 
   if (req.method === 'POST' && url.pathname === '/api/test') return handleTestKey(req, res);
   if (req.method !== 'GET' && req.method !== 'HEAD') return send(res, 405, { error: 'method not allowed' });
+  if (SERVER_KEY && !ADDON_PASSWORD && (parts[0] === 'manifest.json' || parts[0] === 'subtitles')) {
+    rawParts.unshift(SHORT_LINK_CFG);
+    parts.unshift(SHORT_LINK_CFG);
+  }
 
   if (parts.length === 0) return send(res, 302, '', 'text/plain', { Location: '/configure' });
   if (parts[0] === 'health') return send(res, 200, { ok: true, version: pkg.version });

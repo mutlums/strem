@@ -89,6 +89,11 @@ Anahtarın linkte durmasını istemezsen Render'da **Environment** bölümüne
 `GEMINI_API_KEY` ve `ADDON_PASSWORD` ekle. Ayar sayfasında anahtar alanını boş bırak,
 şifreyi gir. Diğer ayarlar için `.env.example` dosyasına bak.
 
+Sadece `GEMINI_API_KEY` ekler, `ADDON_PASSWORD` eklemezsen kısa link
+(`https://…onrender.com/manifest.json`) varsayılan ayarlarla (Türkçe, Kore modu otomatik)
+doğrudan çalışır; AIOStreams gibi uzun linki zor taşıyan yerlerde işe yarar. Bu durumda
+kısa linki bilen herkes senin Gemini kotanı kullanabilir.
+
 ## Geliştirici notları
 
 ```
