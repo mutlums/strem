@@ -19,7 +19,7 @@ const WAIT_MS = parseInt(process.env.TRANSLATE_WAIT_MS, 10) || 100000;
 const PREWARM = process.env.PREWARM !== 'false';
 const SERVER_KEY = process.env.GEMINI_API_KEY || '';
 const ADDON_PASSWORD = process.env.ADDON_PASSWORD || '';
-const CONCURRENCY = parseInt(process.env.GEMINI_CONCURRENCY, 10) || 2;
+const CONCURRENCY = parseInt(process.env.GEMINI_CONCURRENCY, 10) || 1;
 const CINEMETA = (process.env.CINEMETA_URL || 'https://v3-cinemeta.strem.io').replace(/\/$/, '');
 
 const cache = new Cache();
@@ -138,8 +138,8 @@ function startJob(srcUrl, cfg, apiKey, style = 'std') {
         model: cfg.model,
         targetName: languageName(cfg.lang),
         concurrency: CONCURRENCY,
-        batchSize: parseInt(process.env.GEMINI_BATCH_SIZE, 10) || 100,
-        batchChars: 7000,
+        batchSize: parseInt(process.env.GEMINI_BATCH_SIZE, 10) || 250,
+        batchChars: 16000,
         extra: styleInstructions(style, { honorifics: cfg.hon }),
         onProgress: (i, t) => {
           job.translated[i] = t;

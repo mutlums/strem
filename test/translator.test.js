@@ -1,6 +1,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert');
+process.env.GEMINI_RPM = '0'; // no pacing in tests
 const { translateTexts, makeBatches } = require('../src/translator');
 
 // Fake Gemini: echoes each line as "TR(<text>)".
@@ -58,3 +59,22 @@ test('retries on 429', async () => {
 test('bad key is a fatal error', async () => {
   await assert.rejects(translateTexts(['x'], { ...base, fetchImpl: fakeFetch({ status: 400 }) }), (e) => e.fatal && /API key/.test(e.message));
 });
+
+test('per-minute 429 waits as long as Gemini asks, beyond the normal retries', async () => {
+  let n = 0;
+  const ok = fakeFetch();
+  const fetchImpl = async (url, init) => {
+    if (n++ < 3) {
+      return { ok: false, status: 429, headers: new Map(), json: async () => ({ error: { message: 'Quota exceeded for metric: requests per minute. Please retry in 0.05s.', details: [{ retryDelay: '0.05s' }] } }) };
+    }
+    return ok(url, init);
+  };
+  const out = await translateTexts(['x'], { ...base, retries: 1, fetchImpl });
+  assert.deepStrictEqual(out, ['TR(x)']);
+});
+
+test('daily quota is a clear fatal error', async () => {
+  const fetchImpl = async () => ({ ok: false, status: 429, headers: new Map(), json: async () => ({ error: { message: 'Quota exceeded for metric: generate_content_free_tier_requests per day.' } }) });
+  await assert.rejects(translateTexts(['x'], { ...base, fetchImpl }), (e) => e.fatal && /günlük/.test(e.message));
+});
+

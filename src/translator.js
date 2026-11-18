@@ -46,7 +46,39 @@ function systemPrompt(targetName, extra = '') {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-async function callGemini({ apiKey, model, targetName, items, context, extra = '', fetchImpl = fetch, baseUrl = GEMINI_BASE_URL, retries = 4 }) {
+// Pace requests per API key: Gemini's free tier allows only ~15 requests per minute,
+// and several translations (both list options, a prewarm, other users of the same key) can run at once.
+const DEFAULT_RPM = process.env.GEMINI_RPM !== undefined ? parseInt(process.env.GEMINI_RPM, 10) || 0 : 12;
+const recentCalls = new Map(); // api key -> timestamps of recent requests
+
+async function waitForSlot(apiKey, rpm) {
+  if (!rpm) return;
+  for (;;) {
+    const now = Date.now();
+    const list = (recentCalls.get(apiKey) || []).filter((t) => now - t < 60000);
+    if (list.length < rpm) {
+      list.push(now);
+      recentCalls.set(apiKey, list);
+      return;
+    }
+    await sleep(60000 - (now - list[0]) + 50);
+  }
+}
+
+// "Please retry in 21.1s" / RetryInfo.retryDelay "21s" -> milliseconds
+function retryDelayMs(errBody, detail) {
+  const details = (errBody && errBody.error && errBody.error.details) || [];
+  for (const d of details) {
+    if (d && typeof d.retryDelay === 'string') {
+      const n = parseFloat(d.retryDelay);
+      if (n > 0) return Math.ceil(n * 1000);
+    }
+  }
+  const m = /retry in ([\d.]+)\s*s/i.exec(detail || '');
+  return m ? Math.ceil(parseFloat(m[1]) * 1000) : 0;
+}
+
+async function callGemini({ apiKey, model, targetName, items, context, extra = '', fetchImpl = fetch, baseUrl = GEMINI_BASE_URL, retries = 4, rpm = DEFAULT_RPM }) {
   const body = {
     systemInstruction: { parts: [{ text: systemPrompt(targetName, extra) }] },
     contents: [
@@ -64,8 +96,10 @@ async function callGemini({ apiKey, model, targetName, items, context, extra = '
 
   const url = `${baseUrl}/models/${encodeURIComponent(model)}:generateContent`;
   let lastErr;
+  let rateWaits = 0;
   for (let attempt = 0; attempt <= retries; attempt++) {
     let res;
+    await waitForSlot(apiKey, rpm);
     try {
       res = await fetchImpl(url, {
         method: 'POST',
@@ -97,9 +131,10 @@ async function callGemini({ apiKey, model, targetName, items, context, extra = '
     }
 
     let detail = '';
+    let errBody = null;
     try {
-      const err = await res.json();
-      detail = (err.error && err.error.message) || '';
+      errBody = await res.json();
+      detail = (errBody.error && errBody.error.message) || '';
     } catch (_) {
       /* ignore */
     }
@@ -108,14 +143,27 @@ async function callGemini({ apiKey, model, targetName, items, context, extra = '
       // Bad key, wrong model name, API not enabled... retrying won't help.
       throw new FatalTranslationError(detail || `Gemini HTTP ${res.status}`, res.status);
     }
-    // 429 (rate limit) and 5xx: back off and retry.
     lastErr = new Error(detail || `Gemini HTTP ${res.status}`);
     lastErr.status = res.status;
+    if (res.status === 429) {
+      if (/per ?day|PerDay/i.test(detail)) {
+        throw new FatalTranslationError('Gemini günlük ücretsiz kotası doldu, yarın tekrar dene ya da başka bir anahtar kullan.', 429);
+      }
+      // Per-minute limit: wait as long as Gemini asks, without using up the normal retries.
+      const wait = retryDelayMs(errBody, detail);
+      if (wait > 0 && rateWaits < 6) {
+        rateWaits++;
+        attempt--;
+        await sleep(Math.min(wait, 65000) + 500);
+        continue;
+      }
+    }
+    // 5xx (or 429 without a retry hint): back off and retry.
     const retryAfter = parseInt(res.headers.get && res.headers.get('retry-after'), 10);
     await sleep(retryAfter > 0 ? retryAfter * 1000 : 1500 * 2 ** attempt);
   }
   if (lastErr && lastErr.status === 429) {
-    throw new FatalTranslationError(`Gemini kota/limit hatası: ${lastErr.message}`, 429);
+    throw new FatalTranslationError('Gemini dakikalık limiti aşıldı, birazdan altyazıyı yeniden seç.', 429);
   }
   throw lastErr || new Error('Gemini request failed');
 }
@@ -155,6 +203,7 @@ async function translateTexts(texts, opts) {
     fetchImpl,
     baseUrl,
     retries,
+    rpm,
     extra = '',
   } = opts;
 
@@ -165,7 +214,7 @@ async function translateTexts(texts, opts) {
     const items = indices.map((i) => ({ id: i, text: texts[i] }));
     const first = indices[0];
     const context = texts.slice(Math.max(0, first - contextLines), first);
-    const got = await callGemini({ apiKey, model, targetName, items, context, extra, fetchImpl, baseUrl, retries });
+    const got = await callGemini({ apiKey, model, targetName, items, context, extra, fetchImpl, baseUrl, retries, rpm });
     const missing = indices.filter((i) => !got.has(i) || !got.get(i).trim());
     for (const i of indices) {
       if (got.has(i) && got.get(i).trim()) {
@@ -191,7 +240,7 @@ async function translateTexts(texts, opts) {
   }
 
   async function runSingle(i) {
-    const got = await callGemini({ apiKey, model, targetName, items: [{ id: i, text: texts[i] }], context: [], extra, fetchImpl, baseUrl, retries });
+    const got = await callGemini({ apiKey, model, targetName, items: [{ id: i, text: texts[i] }], context: [], extra, fetchImpl, baseUrl, retries, rpm });
     if (got.has(i) && got.get(i).trim()) {
       result[i] = got.get(i);
       onProgress(i, result[i]);

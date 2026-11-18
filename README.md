@@ -18,7 +18,8 @@ başka bir dile) çevirir ve altyazı listesine "Türkçe" seçeneği olarak ekl
 
 Gemini API'nin ücretsiz kullanım katmanı var; güncel dakikalık/günlük limitlerini
 AI Studio'daki "Rate limits" sayfasında görürsün. Bir film altyazısı yaklaşık
-10–20 istek tutar. Limite takılırsan eklenti bekleyip yeniden dener.
+birkaç istek tutar. Eklenti aynı anahtarla dakikada en fazla 12 istek gönderir; limite takılırsa
+Gemini'nin söylediği kadar bekleyip devam eder. Günlük kota dolarsa altyazıda bunu yazar.
 
 ## 2. Eklentiyi ücretsiz yayınla (Render örneği)
 

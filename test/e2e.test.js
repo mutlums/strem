@@ -69,6 +69,7 @@ test('full flow: manifest -> subtitles list -> translated .srt', async (t) => {
 
   process.env.SUBTITLE_SOURCE = `http://127.0.0.1:${portOf(source)}`;
   process.env.ALLOWED_SUB_HOSTS = '127.0.0.1';
+  process.env.GEMINI_RPM = '0';
   process.env.GEMINI_BASE_URL = `http://127.0.0.1:${portOf(gemini)}`;
   process.env.CACHE_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'subcache-'));
   process.env.PREWARM = 'false';
