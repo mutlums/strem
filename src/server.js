@@ -22,7 +22,8 @@ const SERVER_KEY = process.env.GEMINI_API_KEY || '';
 const ADDON_PASSWORD = process.env.ADDON_PASSWORD || '';
 // With GEMINI_API_KEY set and no ADDON_PASSWORD, the short link (no settings in the URL) uses default settings.
 const SHORT_LINK_CFG = encodeConfig({});
-const CONCURRENCY = parseInt(process.env.GEMINI_CONCURRENCY, 10) || 1;
+// Batches sent at once per translation. The per-key pacer in translator.js keeps this within the free-tier rate.
+const CONCURRENCY = parseInt(process.env.GEMINI_CONCURRENCY, 10) || 3;
 const CINEMETA = (process.env.CINEMETA_URL || 'https://v3-cinemeta.strem.io').replace(/\/$/, '');
 
 const cache = new Cache();
@@ -132,6 +133,7 @@ function startJob(srcUrl, cfg, apiKey, style = 'std') {
   job.promise = (async () => {
     const cached = await cache.get(key);
     if (cached) return cached;
+    const t0 = Date.now();
     const original = await fetchText(srcUrl);
     const cues = parseSrt(original);
     if (!cues.length) throw new Error('Kaynak altyazı boş ya da okunamadı');
@@ -154,6 +156,7 @@ function startJob(srcUrl, cfg, apiKey, style = 'std') {
     );
     const srt = serializeSrt(cues.map((c, i) => ({ ...c, text: out[i] })));
     await cache.set(key, srt);
+    console.log(`translation done: ${cues.length} lines, model=${cfg.model}, ${Math.round((Date.now() - t0) / 1000)}s`);
     return srt;
   })()
     .then((srt) => {
