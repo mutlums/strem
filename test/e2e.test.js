@@ -142,6 +142,15 @@ test('full flow: manifest -> subtitles list -> translated .srt', async (t) => {
   const off = JSON.parse((await get(`${A}/${cfgOff}/subtitles/movie/tt6751668.json`)).text).subtitles;
   assert.match(off[0].url, /\/translate\/std\//);
 
+  // installed from the bare manifest (no settings): a setup hint instead of a 404
+  const bare = await get(`${A}/subtitles/movie/tt0111161.json`);
+  assert.strictEqual(bare.status, 200);
+  const hint = JSON.parse(bare.text).subtitles;
+  assert.strictEqual(hint.length, 1);
+  const hintSrt = await get(hint[0].url);
+  assert.strictEqual(hintSrt.status, 200);
+  assert.match(hintSrt.text, /ayarsız kurulmuş/);
+
   // configure page renders, with the Korean options
   const page = await get(`${A}/configure`);
   assert.match(page.text, /Gemini Altyazı Çevirmeni/);

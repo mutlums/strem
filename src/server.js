@@ -77,6 +77,9 @@ function send(res, status, body, type = 'application/json; charset=utf-8', extra
   res.end(payload);
 }
 
+const SETUP_MESSAGE =
+  'Eklenti ayarsız kurulmuş. Ayar sayfasında (/configure) Gemini anahtarınla link oluştur ve eklentiyi o linkle yeniden ekle.';
+
 function errorSrt(message) {
   return serializeSrt([
     { start: '00:00:01,000', end: '00:00:15,000', text: `Gemini Altyazı Çevirmeni: ${message}` },
@@ -295,6 +298,16 @@ async function router(req, res) {
     return send(res, 200, configurePage({ cfg, serverKey: Boolean(SERVER_KEY), needsPassword: Boolean(SERVER_KEY && ADDON_PASSWORD), defaultModel: DEFAULT_MODEL }), 'text/html; charset=utf-8');
   }
   if (parts[0] === 'manifest.json') return send(res, 200, manifest(null));
+  // Installed from the bare /manifest.json (no settings in the link): explain the fix in the player instead of a 404.
+  if (parts[0] === 'subtitles') {
+    return send(res, 200, {
+      subtitles: [{ id: 'gemini-setup-needed', url: `${baseUrl(req)}/setup-needed.srt`, lang: 'tur' }],
+      cacheMaxAge: 0,
+    });
+  }
+  if (parts[0] === 'setup-needed.srt') {
+    return send(res, 200, errorSrt(SETUP_MESSAGE), 'application/x-subrip; charset=utf-8', { 'Cache-Control': 'no-store' });
+  }
 
   const cfgStr = parts[0];
   const cfg = decodeConfig(cfgStr);
