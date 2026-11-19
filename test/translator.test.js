@@ -2,7 +2,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 process.env.GEMINI_RPM = '0'; // no pacing in tests
-const { translateTexts, makeBatches } = require('../src/translator');
+const { translateTexts, makeBatches, buildNotes } = require('../src/translator');
 
 // Fake Gemini: echoes each line as "TR(<text>)".
 function fakeFetch({ dropIdsOnce = [], failFirst = 0, status = 200, calls = [] } = {}) {
@@ -78,3 +78,25 @@ test('daily quota is a clear fatal error', async () => {
   await assert.rejects(translateTexts(['x'], { ...base, fetchImpl }), (e) => e.fatal && /günlük/.test(e.message));
 });
 
+
+test('sends notes and surrounding lines with each batch', async () => {
+  const bodies = [];
+  const inner = fakeFetch();
+  const fetchImpl = async (url, init) => { bodies.push(JSON.parse(JSON.parse(init.body).contents[0].parts[0].text)); return inner(url, init); };
+  const texts = ['a', 'b', 'c', 'd', 'e', 'f'];
+  const notes = { summary: 's', characters: [], address: [], terms: [] };
+  await translateTexts(texts, { ...base, fetchImpl, batchSize: 2, concurrency: 1, notes });
+  assert.deepStrictEqual(bodies[1].context_before, ['a', 'b']);
+  assert.deepStrictEqual(bodies[1].context_after, ['e', 'f']);
+  assert.ok(bodies.every((b) => b.notes && b.notes.summary === 's'));
+});
+
+test('buildNotes returns notes, or null when Gemini fails', async () => {
+  const ok = async () => ({ ok: true, json: async () => ({ candidates: [{ content: { parts: [{ text: JSON.stringify({ summary: 'x', characters: [{ name: 'Mi-rae', who: 'woman' }], address: [], terms: [] }) }] } }] }) });
+  const n = await buildNotes(['<i>Hi</i>', 'there'], { ...base, fetchImpl: ok, rpm: 0 });
+  assert.strictEqual(n.characters[0].name, 'Mi-rae');
+  const bad = async () => ({ ok: false, status: 500, json: async () => ({}) });
+  assert.strictEqual(await buildNotes(['Hi'], { ...base, fetchImpl: bad, rpm: 0 }), null);
+  const throws = async () => { throw new Error('net'); };
+  assert.strictEqual(await buildNotes(['Hi'], { ...base, fetchImpl: throws, rpm: 0 }), null);
+});

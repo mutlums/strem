@@ -74,6 +74,12 @@ yapımıysa (bilgi Stremio/Nuvio'nun kullandığı Cinemeta'dan alınır) çevir
 - Soju, kimchi, ramyeon, hanbok, chaebol gibi kelimeler Türkçe karşılıklarla değiştirilmez.
 - Kore isimleri kaynaktaki gibi (soyadı önce) kalır.
 
+## Doğal çeviri
+
+- Çeviri talimatı, metnin kelime kelime değil Türkçe yazılmış gibi okunması için yazıldı: Türkçe söz dizimi, gereksiz "ben/sen/o" atılır, deyimler Türkçe karşılıklarıyla verilir, karakterlerin konuşma tarzı korunur, satırlar okunabilir uzunlukta tutulur.
+- Çeviriden önce bölümün tamamı hızlı bir modelle bir kez okunur ve karakterler, kimin kime "sen" ya da "siz" dediği ve tekrar eden terimler not edilir. Bu notlar her parçaya gönderilir, böylece bölüm boyunca isimler ve hitaplar tutarlı kalır. Not modeli `GEMINI_NOTES_MODEL` ile değişir (`off` kapatır, varsayılan `gemini-3.5-flash-lite`).
+- Her parça çevrilirken önceki 8 ve sonraki 4 satır da bağlam olarak gönderilir.
+
 ## Senkron: videoya uyan altyazıyı seçme
 
 Bir altyazı eklentisi videonun kendisini görmez; oynatıcı sadece dizinin kimliğini, dosya adını ve (varsa) dosyanın OpenSubtitles parmak izini (videoHash) gönderir. Bu yüzden videonun içine gömülü altyazıyı okuyup çeviremez.

@@ -24,6 +24,8 @@ const get = async (url) => {
 test('full flow: manifest -> subtitles list -> translated .srt', async (t) => {
   let geminiCalls = 0;
   const systemPrompts = [];
+  const notesCalls = [];
+  const notesSeen = [];
   const source = await listen((req, res) => {
     // fake Cinemeta
     if (req.url === '/meta/movie/tt6751668.json') return res.end(JSON.stringify({ meta: { name: 'Parasite', country: 'South Korea' } }));
@@ -58,11 +60,19 @@ test('full flow: manifest -> subtitles list -> translated .srt', async (t) => {
       assert.strictEqual(req.headers['x-goog-api-key'], 'TEST-KEY');
       assert.match(req.url, /\/models\/gemini-3\.(5-flash-lite|6-flash):generateContent$/);
       const parsed = JSON.parse(body);
-      systemPrompts.push(parsed.systemInstruction.parts[0].text);
       const input = JSON.parse(parsed.contents[0].parts[0].text);
       assert.strictEqual(input.target_language, 'Turkish');
-      const lines = input.lines.map((l) => ({ id: l.id, text: `[TR] ${l.text}` }));
       res.setHeader('Content-Type', 'application/json');
+      if (input.task === 'notes') {
+        // the quick read of the whole episode before translating
+        notesCalls.push(input.subtitles);
+        const notes = { summary: 'A test film.', characters: [{ name: 'Andy', who: 'man, 40s' }], address: [], terms: [] };
+        return res.end(JSON.stringify({ candidates: [{ content: { parts: [{ text: JSON.stringify(notes) }] } }] }));
+      }
+      systemPrompts.push(parsed.systemInstruction.parts[0].text);
+      notesSeen.push(input.notes);
+      assert.ok(Array.isArray(input.context_before) && Array.isArray(input.context_after));
+      const lines = input.lines.map((l) => ({ id: l.id, text: `[TR] ${l.text}` }));
       res.end(JSON.stringify({ candidates: [{ content: { parts: [{ text: JSON.stringify({ lines }) }] } }] }));
     });
   });
@@ -104,6 +114,12 @@ test('full flow: manifest -> subtitles list -> translated .srt', async (t) => {
   assert.match(srt.text, /\[TR\] <i>We've been waiting<\/i>\nfor hours!/);
   assert.strictEqual((srt.text.match(/-->/g) || []).length, 5, 'all 5 cues kept with timing');
   const callsAfterFirst = geminiCalls;
+  // the whole episode was read once first, and its notes went along with every batch
+  assert.strictEqual(notesCalls.length, 1);
+  assert.match(notesCalls[0], /Hey, where have you been\?/);
+  assert.ok(notesSeen.length > 0 && notesSeen.every((n) => n && n.characters[0].name === 'Andy'));
+  // natural-Turkish rules are in the prompt
+  assert.ok(systemPrompts.every((p) => /Turkish style/.test(p)));
 
   // second request comes from cache, no new Gemini calls
   const again = await get(subs[0].url);

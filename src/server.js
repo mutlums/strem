@@ -4,7 +4,7 @@ const http = require('http');
 const { parseExtra, rankForSync } = require('./match');
 const crypto = require('crypto');
 const { parseSrt, serializeSrt } = require('./srt');
-const { translateTexts } = require('./translator');
+const { translateTexts, buildNotes } = require('./translator');
 const { decodeConfig, encodeConfig, DEFAULT_MODEL } = require('./config');
 const { languageName, LANGUAGES } = require('./languages');
 const { Cache } = require('./cache');
@@ -23,6 +23,9 @@ const ADDON_PASSWORD = process.env.ADDON_PASSWORD || '';
 // With GEMINI_API_KEY set and no ADDON_PASSWORD, the short link (no settings in the URL) uses default settings.
 const SHORT_LINK_CFG = encodeConfig({});
 // Batches sent at once per translation. The per-key pacer in translator.js keeps this within the free-tier rate.
+// Model for the quick read of the whole episode before translating (GEMINI_NOTES_MODEL=off disables it).
+const NOTES_MODEL = /^(off|0|false)$/i.test(process.env.GEMINI_NOTES_MODEL || '') ? '' : (process.env.GEMINI_NOTES_MODEL || 'gemini-3.5-flash-lite').trim();
+const NOTES_WAIT_MS = parseInt(process.env.GEMINI_NOTES_WAIT_MS, 10) || 25000;
 const CONCURRENCY = parseInt(process.env.GEMINI_CONCURRENCY, 10) || 3;
 const CINEMETA = (process.env.CINEMETA_URL || 'https://v3-cinemeta.strem.io').replace(/\/$/, '');
 
@@ -103,7 +106,7 @@ async function fetchText(url, timeoutMs = 20000) {
 
 function cacheKey(srcUrl, cfg, style) {
   const styleKey = style === 'kr' ? `kr-${cfg.hon}` : 'std';
-  return crypto.createHash('sha1').update(`${srcUrl}|${cfg.lang}|${cfg.model}|${styleKey}|v2`).digest('hex');
+  return crypto.createHash('sha1').update(`${srcUrl}|${cfg.lang}|${cfg.model}|${styleKey}|v3`).digest('hex');
 }
 
 // Is this title South Korean? Uses Cinemeta (the metadata addon Stremio/Nuvio use). Cached per title.
@@ -139,16 +142,31 @@ function startJob(srcUrl, cfg, apiKey, style = 'std') {
     if (!cues.length) throw new Error('Kaynak altyazı boş ya da okunamadı');
     job.cues = cues;
     job.translated = cues.map(() => null);
+    const texts = cues.map((c) => c.text);
+    const targetName = languageName(cfg.lang);
+    const extra = styleInstructions(style, { honorifics: cfg.hon });
+    // Episode notes (characters, sen/siz, terms) keep the parallel batches consistent. A fast model
+    // reads the whole episode first; if it is slow or fails, we translate without notes.
+    let notes = null;
+    if (NOTES_MODEL) {
+      const tn = Date.now();
+      notes = await Promise.race([
+        buildNotes(texts, { apiKey, model: NOTES_MODEL, targetName, extra }),
+        new Promise((r) => setTimeout(() => r(null), NOTES_WAIT_MS).unref()),
+      ]);
+      console.log(`episode notes: ${notes ? `${notes.characters.length} characters, ${notes.terms.length} terms` : 'none'}, ${Math.round((Date.now() - tn) / 1000)}s`);
+    }
     const out = await translateTexts(
-      cues.map((c) => c.text),
+      texts,
       {
+        notes,
         apiKey,
         model: cfg.model,
-        targetName: languageName(cfg.lang),
+        targetName,
         concurrency: CONCURRENCY,
         batchSize: parseInt(process.env.GEMINI_BATCH_SIZE, 10) || 250,
         batchChars: 16000,
-        extra: styleInstructions(style, { honorifics: cfg.hon }),
+        extra,
         onProgress: (i, t) => {
           job.translated[i] = t;
         },

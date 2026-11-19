@@ -29,6 +29,24 @@ const RESPONSE_SCHEMA = {
   required: ['lines'],
 };
 
+// Extra rules that make Turkish subtitles read like they were written in Turkish, not translated.
+const TURKISH_RULES = [
+  'Turkish style (most important: it must read as if a Turkish subtitler wrote it, never like a word-for-word translation):',
+  '- Translate the meaning and intent of each line, not its words. Rebuild the sentence in natural Turkish word order (verb usually last).',
+  '- Turkish drops subject pronouns: write "Geliyorum", not "Ben geliyorum", unless the pronoun is stressed. Avoid "o/onlar/bu" where the verb ending is enough.',
+  '- Use everyday spoken Turkish for dialogue: "Ne yapıyorsun?", "Nereye gidiyorsun?", "Boş ver.", "Olur mu öyle şey?", "Dalga mı geçiyorsun?".',
+  '  Avoid stiff written or translated phrasing: say "Buna gerek var mı?", not "Bunu yapmaya ihtiyacın var mı?".',
+  '- Replace idioms and fixed phrases with real Turkish equivalents, not literal ones: "Come on" -> "Hadi ama", "No way" -> "Olamaz" / "Hayatta olmaz",',
+  '  "Never mind" -> "Boş ver", "Take care" -> "Kendine iyi bak", "I\'m sorry" -> "Özür dilerim" / "Kusura bakma" (apology) or "Başın sağ olsun" (loss),',
+  '  "Oh my God" -> "Aman Allahım" / "Hay Allah" (vary it), "Excuse me" -> "Pardon" / "Bakar mısınız?". Vary repeated fillers ("Tamam", "Vay canına", "Lütfen") the way people really talk.',
+  '- Match each speaker\'s voice: a child, a grandmother, a gangster and a CEO must not sound alike. Keep jokes, sarcasm and insults working in Turkish.',
+  '- Keep the "sen"/"siz" choice consistent for the same two people, and keep the verb endings matching it.',
+  '- Correct Turkish spelling and punctuation: ç ğ ı İ ö ş ü, "de/da" and "ki" written separately when they are conjunctions, a question particle "mı/mi/mu/mü" written separately.',
+  '- Reading speed: keep subtitles short and easy to read, at most about 42 characters per line and 2 lines. Shorten wordy lines without losing meaning.',
+  '- When one sentence runs over several lines, each line must still read naturally on its own and the lines together must form one correct Turkish sentence.',
+  '  You may move words between those lines so the Turkish order works, but keep each line close to what is said at that moment.',
+].join('\n');
+
 function systemPrompt(targetName, extra = '') {
   const base = [
     `You are a professional subtitle translator. Translate every subtitle line into ${targetName}.`,
@@ -39,9 +57,13 @@ function systemPrompt(targetName, extra = '') {
     '- Keep formatting tags exactly as they are, e.g. <i>, </i>, <b>, <font ...>, {\\an8}.',
     '- Keep names of people and places. Translate sound descriptions like [door slams] or (laughs).',
     '- Lines that only contain music symbols or are already in the target language stay unchanged.',
-    '- The "context" lines are earlier dialogue for reference only. Do not translate or return them.',
+    '- "context_before" and "context_after" are the surrounding dialogue, for reference only (who is talking, what a line refers to). Do not translate or return them.',
+    '- "notes", when given, describe the characters, how they address each other and fixed terms for the whole episode. Follow them so every part of the episode is consistent.',
   ].join('\n');
-  return extra ? `${base}\n\n${extra}` : base;
+  const parts = [base];
+  if (/^turkish$/i.test(targetName)) parts.push(TURKISH_RULES);
+  if (extra) parts.push(extra);
+  return parts.join('\n\n');
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -83,13 +105,13 @@ function retryDelayMs(errBody, detail) {
   return m ? Math.ceil(parseFloat(m[1]) * 1000) : 0;
 }
 
-async function callGemini({ apiKey, model, targetName, items, context, extra = '', fetchImpl = fetch, baseUrl = GEMINI_BASE_URL, retries = 4, rpm = defaultRpm(model) }) {
+async function callGemini({ apiKey, model, targetName, items, context = [], contextAfter = [], notes = null, extra = '', fetchImpl = fetch, baseUrl = GEMINI_BASE_URL, retries = 4, rpm = defaultRpm(model) }) {
   const body = {
     systemInstruction: { parts: [{ text: systemPrompt(targetName, extra) }] },
     contents: [
       {
         role: 'user',
-        parts: [{ text: JSON.stringify({ target_language: targetName, context, lines: items }) }],
+        parts: [{ text: JSON.stringify({ target_language: targetName, ...(notes ? { notes } : {}), context_before: context, context_after: contextAfter, lines: items }) }],
       },
     ],
     generationConfig: {
@@ -203,7 +225,9 @@ async function translateTexts(texts, opts) {
     batchSize = 80,
     batchChars = 6000,
     concurrency = 3,
-    contextLines = 3,
+    contextLines = 8,
+    contextAfterLines = 4,
+    notes = null,
     onProgress = () => {},
     fetchImpl,
     baseUrl,
@@ -218,8 +242,10 @@ async function translateTexts(texts, opts) {
   async function runBatch(indices) {
     const items = indices.map((i) => ({ id: i, text: texts[i] }));
     const first = indices[0];
+    const last = indices[indices.length - 1];
     const context = texts.slice(Math.max(0, first - contextLines), first);
-    const got = await callGemini({ apiKey, model, targetName, items, context, extra, fetchImpl, baseUrl, retries, rpm });
+    const contextAfter = texts.slice(last + 1, last + 1 + contextAfterLines);
+    const got = await callGemini({ apiKey, model, targetName, items, context, contextAfter, notes, extra, fetchImpl, baseUrl, retries, rpm });
     const missing = indices.filter((i) => !got.has(i) || !got.get(i).trim());
     for (const i of indices) {
       if (got.has(i) && got.get(i).trim()) {
@@ -245,7 +271,7 @@ async function translateTexts(texts, opts) {
   }
 
   async function runSingle(i) {
-    const got = await callGemini({ apiKey, model, targetName, items: [{ id: i, text: texts[i] }], context: [], extra, fetchImpl, baseUrl, retries, rpm });
+    const got = await callGemini({ apiKey, model, targetName, items: [{ id: i, text: texts[i] }], context: texts.slice(Math.max(0, i - 3), i), contextAfter: texts.slice(i + 1, i + 3), notes, extra, fetchImpl, baseUrl, retries, rpm });
     if (got.has(i) && got.get(i).trim()) {
       result[i] = got.get(i);
       onProgress(i, result[i]);
@@ -271,4 +297,97 @@ async function translateTexts(texts, opts) {
   return result;
 }
 
-module.exports = { translateTexts, callGemini, makeBatches, FatalTranslationError, systemPrompt };
+// One quick look at the whole episode before translating it, so every batch (they run in parallel)
+// uses the same name spellings, the same sen/siz between the same people and the same terms.
+const NOTES_SCHEMA = {
+  type: 'OBJECT',
+  properties: {
+    summary: { type: 'STRING' },
+    characters: {
+      type: 'ARRAY',
+      items: {
+        type: 'OBJECT',
+        properties: { name: { type: 'STRING' }, who: { type: 'STRING' } },
+        required: ['name', 'who'],
+      },
+    },
+    address: {
+      type: 'ARRAY',
+      items: {
+        type: 'OBJECT',
+        properties: { between: { type: 'STRING' }, form: { type: 'STRING' } },
+        required: ['between', 'form'],
+      },
+    },
+    terms: {
+      type: 'ARRAY',
+      items: {
+        type: 'OBJECT',
+        properties: { source: { type: 'STRING' }, target: { type: 'STRING' } },
+        required: ['source', 'target'],
+      },
+    },
+  },
+  required: ['summary', 'characters', 'address', 'terms'],
+};
+
+function notesPrompt(targetName, extra = '') {
+  const base = [
+    `You prepare a subtitle translation into ${targetName}. Read the whole episode's subtitles and write short notes for the translators.`,
+    'Do not translate the lines. Return JSON with:',
+    '- summary: two or three sentences on what happens and the tone (comedy, thriller, romance...).',
+    '- characters: the main people (at most 15), with the name spelled as it must appear in the translation, and "who": gender, rough age and role,',
+    '  e.g. "woman, 30s, the bride" (gender matters: the source language may hide it).',
+    `- address: for the main pairs who talk to each other, how they address each other in ${targetName}, e.g. between "Ji-woo -> her mother-in-law", form "siz, Eomeoni".`,
+    `- terms: recurring names of places, companies, titles or invented words, with the one ${targetName} form to use everywhere (at most 20).`,
+    'Keep every field short. Use only what the subtitles show; leave a list empty when unsure.',
+  ].join('\n');
+  return extra ? `${base}\n\nThe translation follows these style rules, so the notes should too:\n${extra}` : base;
+}
+
+/**
+ * Builds episode notes (characters, sen/siz, terms) from the whole subtitle. Returns null on any failure:
+ * the translation then simply runs without notes.
+ */
+async function buildNotes(texts, { apiKey, model, targetName, extra = '', maxChars = 60000, fetchImpl = fetch, baseUrl = GEMINI_BASE_URL, rpm }) {
+  let script = '';
+  for (const t of texts) {
+    const line = t.replace(/<[^>]+>|\{\\[^}]*\}/g, '').replace(/\s*\n\s*/g, ' ').trim();
+    if (!line) continue;
+    if (script.length + line.length + 1 > maxChars) break;
+    script += `${line}\n`;
+  }
+  if (!script) return null;
+  const body = {
+    systemInstruction: { parts: [{ text: notesPrompt(targetName, extra) }] },
+    contents: [{ role: 'user', parts: [{ text: JSON.stringify({ task: 'notes', target_language: targetName, subtitles: script }) }] }],
+    generationConfig: { temperature: 0.2, responseMimeType: 'application/json', responseSchema: NOTES_SCHEMA },
+  };
+  try {
+    await waitForSlot(`${apiKey}|${model}`, rpm === undefined ? defaultRpm(model) : rpm);
+    const res = await fetchImpl(`${baseUrl}/models/${encodeURIComponent(model)}:generateContent`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const cand = data.candidates && data.candidates[0];
+    const text = cand && cand.content && Array.isArray(cand.content.parts) ? cand.content.parts.map((p) => p.text || '').join('') : '';
+    const n = JSON.parse(text || 'null');
+    if (!n || typeof n !== 'object') return null;
+    const list = (a, max) => (Array.isArray(a) ? a.filter((x) => x && typeof x === 'object').slice(0, max) : []);
+    const notes = {
+      summary: typeof n.summary === 'string' ? n.summary.slice(0, 600) : '',
+      characters: list(n.characters, 15),
+      address: list(n.address, 20),
+      terms: list(n.terms, 20),
+    };
+    if (!notes.summary && !notes.characters.length && !notes.address.length && !notes.terms.length) return null;
+    return notes;
+  } catch (_) {
+    return null;
+  }
+}
+
+module.exports = { translateTexts, callGemini, makeBatches, buildNotes, FatalTranslationError, systemPrompt };
