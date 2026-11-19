@@ -27,6 +27,10 @@ const SHORT_LINK_CFG = encodeConfig({});
 const NOTES_MODEL = /^(off|0|false)$/i.test(process.env.GEMINI_NOTES_MODEL || '') ? '' : (process.env.GEMINI_NOTES_MODEL || 'gemini-3.5-flash-lite').trim();
 // When the chosen model's daily free quota is used up, finish with this one (GEMINI_FALLBACK_MODEL=off disables it).
 const FALLBACK_MODEL = /^(off|0|false)$/i.test(process.env.GEMINI_FALLBACK_MODEL || '') ? '' : (process.env.GEMINI_FALLBACK_MODEL || 'gemini-3.5-flash-lite').trim();
+// Last fallback when Gemini's free quotas are used up: OpenRouter's free models (needs OPENROUTER_API_KEY).
+// Only used with the server's own Gemini key, so people who installed with their own key never spend it.
+const OPENROUTER_KEY = (process.env.OPENROUTER_API_KEY || '').trim();
+const OPENROUTER_MODEL = (process.env.OPENROUTER_MODEL || 'nvidia/nemotron-3.5-super-vl:free,google/gemma-4-31b-it:free,openrouter/free').trim();
 const NOTES_WAIT_MS = parseInt(process.env.GEMINI_NOTES_WAIT_MS, 10) || 25000;
 const CONCURRENCY = parseInt(process.env.GEMINI_CONCURRENCY, 10) || 3;
 const CINEMETA = (process.env.CINEMETA_URL || 'https://v3-cinemeta.strem.io').replace(/\/$/, '');
@@ -162,8 +166,11 @@ function startJob(srcUrl, cfg, apiKey, style = 'std') {
       texts,
       {
         notes,
-        fallbackModel: FALLBACK_MODEL && FALLBACK_MODEL !== cfg.model ? FALLBACK_MODEL : '',
-        onFallback: (m) => console.log(`daily quota of ${cfg.model} used up, continuing with ${m}`),
+        fallbacks: [
+          ...(FALLBACK_MODEL && FALLBACK_MODEL !== cfg.model ? [{ model: FALLBACK_MODEL }] : []),
+          ...(OPENROUTER_KEY && OPENROUTER_MODEL && apiKey === SERVER_KEY ? [{ provider: 'openrouter', model: OPENROUTER_MODEL, apiKey: OPENROUTER_KEY }] : []),
+        ],
+        onFallback: (m, provider) => console.log(`daily quota used up, continuing with ${provider === 'openrouter' ? 'OpenRouter ' : ''}${m}`),
         apiKey,
         model: cfg.model,
         targetName,
@@ -178,7 +185,7 @@ function startJob(srcUrl, cfg, apiKey, style = 'std') {
     );
     const srt = serializeSrt(cues.map((c, i) => ({ ...c, text: out[i] })));
     await cache.set(key, srt);
-    console.log(`translation done: ${cues.length} lines, model=${cfg.model}, ${Math.round((Date.now() - t0) / 1000)}s`);
+    console.log(`translation done: ${cues.length} lines, model=${out.usedModel || cfg.model}, ${Math.round((Date.now() - t0) / 1000)}s`);
     return srt;
   })()
     .then((srt) => {

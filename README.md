@@ -81,6 +81,15 @@ yapımıysa (bilgi Stremio/Nuvio'nun kullandığı Cinemeta'dan alınır) çevir
 - Her parça çevrilirken önceki 8 ve sonraki 4 satır da bağlam olarak gönderilir.
 - Flash'ın günlük ücretsiz kotası dolarsa çeviri yarıda kalmaz, kalan satırlar `gemini-3.5-flash-lite` ile tamamlanır (`GEMINI_FALLBACK_MODEL` ile değişir, `off` kapatır).
 
+## OpenRouter yedeği
+
+Gemini'nin günlük ücretsiz kotası (Flash, sonra Flash-Lite) dolunca çeviri OpenRouter'ın ücretsiz modelleriyle devam eder.
+
+- Render'da `OPENROUTER_API_KEY` ortam değişkenine OpenRouter anahtarını gir. Anahtar yoksa yedek kapalıdır.
+- Modeller `OPENROUTER_MODEL` ile değişir (virgülle sırayla). Varsayılan: `nvidia/nemotron-3.5-super-vl:free,google/gemma-4-31b-it:free,openrouter/free`. Sadece `:free` modeller kullanıldığı için ücret çıkmaz.
+- Ücretsiz hesapta günde 50 istek var (bir bölüm 3-5 istek). Yedek sadece sunucunun kendi Gemini anahtarıyla (kısa `/tr` linki) çalışır.
+- "data policy" hatası alırsan OpenRouter'da Settings > Privacy altında ücretsiz modellere izin ver.
+
 ## Senkron: videoya uyan altyazıyı seçme
 
 Bir altyazı eklentisi videonun kendisini görmez; oynatıcı sadece dizinin kimliğini, dosya adını ve (varsa) dosyanın OpenSubtitles parmak izini (videoHash) gönderir. Bu yüzden videonun içine gömülü altyazıyı okuyup çeviremez.

@@ -2,7 +2,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 process.env.GEMINI_RPM = '0'; // no pacing in tests
-const { translateTexts, makeBatches, buildNotes } = require('../src/translator');
+const { translateTexts, makeBatches, buildNotes, parseLinesJson } = require('../src/translator');
 
 // Fake Gemini: echoes each line as "TR(<text>)".
 function fakeFetch({ dropIdsOnce = [], failFirst = 0, status = 200, calls = [] } = {}) {
@@ -116,4 +116,48 @@ test('switches to the fallback model when the daily quota runs out', async () =>
   assert.deepStrictEqual(out, ['TR(a)', 'TR(b)', 'TR(c)']);
   assert.strictEqual(switched, 'gemini-3.5-flash-lite');
   assert.strictEqual(calls.filter((u) => /3\.6-flash/.test(u)).length, 1, 'stops asking the exhausted model');
+});
+
+test('falls back to OpenRouter when every Gemini model is out of daily quota', async () => {
+  const orCalls = [];
+  const daily = { ok: false, status: 429, headers: new Map(), json: async () => ({ error: { message: 'Quota exceeded, GenerateRequestsPerDayPerProjectPerModel' } }) };
+  const fetchImpl = async (url, init) => {
+    if (!/openrouter/.test(url)) return daily;
+    const body = JSON.parse(init.body);
+    orCalls.push({ body, headers: init.headers });
+    const req = JSON.parse(body.messages[1].content);
+    const lines = req.lines.map((l) => ({ id: l.id, text: `OR(${l.text})` }));
+    // models sometimes wrap the JSON in a code fence
+    return { ok: true, status: 200, json: async () => ({ choices: [{ message: { content: '```json\n' + JSON.stringify({ lines }) + '\n```' } }] }) };
+  };
+  const switched = [];
+  const out = await translateTexts(['a', 'b', 'c'], {
+    ...base,
+    model: 'gemini-3.6-flash',
+    fetchImpl,
+    batchSize: 2,
+    concurrency: 1,
+    fallbacks: [{ model: 'gemini-3.5-flash-lite' }, { provider: 'openrouter', model: 'x/one:free, y/two:free', apiKey: 'or-key' }],
+    onFallback: (m, p) => switched.push(`${p}:${m}`),
+  });
+  assert.deepStrictEqual(out, ['OR(a)', 'OR(b)', 'OR(c)']);
+  assert.strictEqual(out.usedModel, 'x/one:free, y/two:free');
+  assert.deepStrictEqual(switched, ['gemini:gemini-3.5-flash-lite', 'openrouter:x/one:free, y/two:free']);
+  assert.ok(orCalls.length >= 1);
+  assert.deepStrictEqual(orCalls[0].body.models, ['x/one:free', 'y/two:free']);
+  assert.strictEqual(orCalls[0].headers.Authorization, 'Bearer or-key');
+  assert.match(orCalls[0].body.messages[0].content, /Turkish style/);
+});
+
+test('OpenRouter daily limit is a clear fatal error', async () => {
+  const fetchImpl = async () => ({ ok: false, status: 429, headers: new Map(), json: async () => ({ error: { code: 429, message: 'Rate limit exceeded: free-models-per-day' } }) });
+  const { callOpenRouter } = require('../src/translator');
+  await assert.rejects(callOpenRouter({ apiKey: 'k', model: 'x:free', targetName: 'Turkish', items: [{ id: 0, text: 'a' }], fetchImpl, baseUrl: 'http://openrouter.fake', rpm: 0 }), (e) => e.fatal && e.daily && /OpenRouter/.test(e.message));
+});
+
+test('parseLinesJson reads plain, fenced and wrapped JSON', () => {
+  assert.deepStrictEqual(parseLinesJson('{"lines":[]}'), { lines: [] });
+  assert.deepStrictEqual(parseLinesJson('```json\n{"lines":[{"id":1,"text":"x"}]}\n```'), { lines: [{ id: 1, text: 'x' }] });
+  assert.deepStrictEqual(parseLinesJson('Here you go: {"lines":[]} done'), { lines: [] });
+  assert.strictEqual(parseLinesJson('nope'), null);
 });

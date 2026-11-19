@@ -5,6 +5,7 @@
 // and numbering never pass through the model: only the text does.
 
 const GEMINI_BASE_URL = process.env.GEMINI_BASE_URL || 'https://generativelanguage.googleapis.com/v1beta';
+const OPENROUTER_BASE_URL = process.env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1';
 
 class FatalTranslationError extends Error {
   constructor(message, status) {
@@ -197,6 +198,96 @@ async function callGemini({ apiKey, model, targetName, items, context = [], cont
   throw lastErr || new Error('Gemini request failed');
 }
 
+// The same request through OpenRouter (OpenAI-style chat API), used as the last fallback when Gemini's
+// free quotas are used up. `model` may list several models separated by commas: OpenRouter then tries
+// them in order when one is busy or down. Only ":free" models are used by default, so nothing is billed.
+function parseLinesJson(text) {
+  if (!text) return null;
+  let t = String(text).trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '');
+  try {
+    return JSON.parse(t);
+  } catch (_) {
+    const a = t.indexOf('{');
+    const b = t.lastIndexOf('}');
+    if (a >= 0 && b > a) {
+      try {
+        return JSON.parse(t.slice(a, b + 1));
+      } catch (_) {
+        /* fall through */
+      }
+    }
+  }
+  return null;
+}
+
+const JSON_SHAPE = 'Answer with JSON only, no other text, exactly in this shape: {"lines":[{"id":<the same id>,"text":"<the translated line>"}]}';
+
+async function callOpenRouter({ apiKey, model, targetName, items, context = [], contextAfter = [], notes = null, extra = '', fetchImpl = fetch, baseUrl = OPENROUTER_BASE_URL, retries = 3, rpm = 15 }) {
+  const models = String(model || '').split(',').map((m) => m.trim()).filter(Boolean);
+  const body = {
+    ...(models.length > 1 ? { models } : { model: models[0] }),
+    messages: [
+      { role: 'system', content: `${systemPrompt(targetName, extra)}\n\n${JSON_SHAPE}` },
+      { role: 'user', content: JSON.stringify({ target_language: targetName, ...(notes ? { notes } : {}), context_before: context, context_after: contextAfter, lines: items }) },
+    ],
+    temperature: 0.3,
+    response_format: { type: 'json_object' },
+  };
+  let lastErr;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    let res;
+    await waitForSlot(`openrouter|${apiKey}`, rpm);
+    try {
+      res = await fetchImpl(`${baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}`, 'X-Title': 'Subtitle translator' },
+        body: JSON.stringify(body),
+      });
+    } catch (err) {
+      lastErr = err;
+      await sleep(1000 * 2 ** attempt);
+      continue;
+    }
+    let data = null;
+    try {
+      data = await res.json();
+    } catch (_) {
+      /* ignore */
+    }
+    // OpenRouter can also put an error inside a 200 response.
+    const errObj = data && data.error;
+    const status = res.ok && !errObj ? 200 : (errObj && Number(errObj.code)) || res.status || 500;
+    if (status === 200) {
+      const choice = data && data.choices && data.choices[0];
+      const text = choice && choice.message && typeof choice.message.content === 'string' ? choice.message.content : '';
+      const parsed = parseLinesJson(text);
+      const out = new Map();
+      const list = Array.isArray(parsed) ? parsed : (parsed && parsed.lines) || [];
+      for (const l of list) {
+        const id = l && (Number.isInteger(l.id) ? l.id : parseInt(l.id, 10));
+        if (Number.isInteger(id) && typeof l.text === 'string') out.set(id, l.text);
+      }
+      return out;
+    }
+    const detail = (errObj && errObj.message) || `OpenRouter HTTP ${status}`;
+    if (status === 401 || status === 403) throw new FatalTranslationError('OpenRouter anahtarı geçersiz.', status);
+    if (status === 402) throw Object.assign(new FatalTranslationError('OpenRouter bakiyesi eksi, ücretsiz modeller kapandı.', 402), { daily: true });
+    if (status === 404 && /data policy|privacy/i.test(detail)) {
+      throw new FatalTranslationError('OpenRouter gizlilik ayarı ücretsiz modelleri engelliyor (Settings > Privacy).', 404);
+    }
+    if (status === 400 || status === 404) throw new FatalTranslationError(`OpenRouter: ${detail}`, status);
+    lastErr = new Error(detail);
+    lastErr.status = status;
+    if (status === 429 && /per[- ]?day|daily|free-models-per-day/i.test(detail)) {
+      throw Object.assign(new FatalTranslationError('OpenRouter günlük ücretsiz kotası da doldu, yarın tekrar dene.', 429), { daily: true });
+    }
+    const retryAfter = parseInt(res.headers && res.headers.get && res.headers.get('retry-after'), 10);
+    await sleep(retryAfter > 0 ? Math.min(retryAfter, 60) * 1000 : 2000 * 2 ** attempt);
+  }
+  if (lastErr && lastErr.status === 429) throw new FatalTranslationError('OpenRouter şu an yoğun, birazdan altyazıyı yeniden seç.', 429);
+  throw lastErr || new Error('OpenRouter request failed');
+}
+
 function makeBatches(texts, { batchSize, batchChars }) {
   const batches = [];
   let cur = [];
@@ -230,6 +321,7 @@ async function translateTexts(texts, opts) {
     contextAfterLines = 4,
     notes = null,
     fallbackModel = '',
+    fallbacks: fallbackList,
     onFallback = () => {},
     onProgress = () => {},
     fetchImpl,
@@ -241,9 +333,18 @@ async function translateTexts(texts, opts) {
 
   const result = texts.slice();
   const batches = makeBatches(texts, { batchSize, batchChars });
-  // When the chosen model's daily free quota runs out, carry on with the fallback model
-  // (Flash-Lite has a much larger free quota) instead of leaving the episode untranslated.
-  let model = opts.model;
+  // When the chosen model's daily free quota runs out, carry on with the next step of the chain
+  // (Gemini Flash-Lite, then OpenRouter's free models) instead of leaving the episode untranslated.
+  const steps = [{ provider: 'gemini', model: opts.model, apiKey }];
+  for (const f of fallbackList || (fallbackModel ? [{ model: fallbackModel }] : [])) {
+    if (f && f.model) steps.push({ provider: f.provider || 'gemini', model: f.model, apiKey: f.apiKey || apiKey });
+  }
+  let step = 0;
+  const call = (args) => {
+    const s = steps[step];
+    const fn = s.provider === 'openrouter' ? callOpenRouter : callGemini;
+    return fn({ ...args, apiKey: s.apiKey, model: s.model, targetName, notes, extra, fetchImpl, retries, ...(s.provider === 'openrouter' ? {} : { baseUrl, rpm }) });
+  };
 
   async function runBatch(indices) {
     const items = indices.map((i) => ({ id: i, text: texts[i] }));
@@ -251,7 +352,7 @@ async function translateTexts(texts, opts) {
     const last = indices[indices.length - 1];
     const context = texts.slice(Math.max(0, first - contextLines), first);
     const contextAfter = texts.slice(last + 1, last + 1 + contextAfterLines);
-    const got = await callGemini({ apiKey, model, targetName, items, context, contextAfter, notes, extra, fetchImpl, baseUrl, retries, rpm });
+    const got = await call({ items, context, contextAfter });
     const missing = indices.filter((i) => !got.has(i) || !got.get(i).trim());
     for (const i of indices) {
       if (got.has(i) && got.get(i).trim()) {
@@ -277,7 +378,7 @@ async function translateTexts(texts, opts) {
   }
 
   async function runSingle(i) {
-    const got = await callGemini({ apiKey, model, targetName, items: [{ id: i, text: texts[i] }], context: texts.slice(Math.max(0, i - 3), i), contextAfter: texts.slice(i + 1, i + 3), notes, extra, fetchImpl, baseUrl, retries, rpm });
+    const got = await call({ items: [{ id: i, text: texts[i] }], context: texts.slice(Math.max(0, i - 3), i), contextAfter: texts.slice(i + 1, i + 3) });
     if (got.has(i) && got.get(i).trim()) {
       result[i] = got.get(i);
       onProgress(i, result[i]);
@@ -290,26 +391,31 @@ async function translateTexts(texts, opts) {
   async function worker() {
     while (next < batches.length && !fatal) {
       const b = batches[next++];
-      try {
-        await runBatch(b);
-      } catch (err) {
-        if (err.daily && fallbackModel) {
-          if (model !== fallbackModel) {
-            model = fallbackModel;
-            onFallback(fallbackModel);
+      for (;;) {
+        const usedStep = step;
+        const todo = usedStep === 0 && step === 0 ? b : b.filter((i) => result[i] === texts[i]);
+        if (!todo.length) break;
+        try {
+          await runBatch(todo);
+          break;
+        } catch (err) {
+          if (err.daily && usedStep + 1 < steps.length) {
+            // Out of daily quota: move to the next step (once, even with parallel workers) and redo the rest of this batch.
+            if (step === usedStep) {
+              step = usedStep + 1;
+              onFallback(steps[step].model, steps[step].provider);
+            }
+            continue;
           }
-          try {
-            await runBatch(b.filter((i) => result[i] === texts[i]));
-          } catch (err2) {
-            if (err2.fatal) fatal = err2; // the fallback is out of quota too
-          }
-        } else if (err.fatal) fatal = err;
-        // non-fatal errors: leave this batch untranslated, keep going
+          if (err.fatal) fatal = err;
+          break; // non-fatal errors: leave this batch untranslated, keep going
+        }
       }
     }
   }
   await Promise.all(Array.from({ length: Math.min(concurrency, batches.length) }, worker));
   if (fatal) throw fatal;
+  Object.defineProperty(result, 'usedModel', { value: steps[step].model, enumerable: false });
   return result;
 }
 
@@ -406,4 +512,4 @@ async function buildNotes(texts, { apiKey, model, targetName, extra = '', maxCha
   }
 }
 
-module.exports = { translateTexts, callGemini, makeBatches, buildNotes, FatalTranslationError, systemPrompt };
+module.exports = { translateTexts, callGemini, callOpenRouter, parseLinesJson, makeBatches, buildNotes, FatalTranslationError, systemPrompt };
