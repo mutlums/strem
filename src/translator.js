@@ -174,7 +174,9 @@ async function callGemini({ apiKey, model, targetName, items, context = [], cont
     lastErr.status = res.status;
     if (res.status === 429) {
       if (/per ?day|PerDay/i.test(detail)) {
-        throw new FatalTranslationError('Gemini günlük ücretsiz kotası doldu, yarın tekrar dene ya da başka bir anahtar kullan.', 429);
+        const e = new FatalTranslationError('Gemini günlük ücretsiz kotası doldu, yarın tekrar dene ya da başka bir anahtar kullan.', 429);
+        e.daily = true;
+        throw e;
       }
       // Per-minute limit: wait as long as Gemini asks, without using up the normal retries.
       const wait = retryDelayMs(errBody, detail);
@@ -220,7 +222,6 @@ function makeBatches(texts, { batchSize, batchChars }) {
 async function translateTexts(texts, opts) {
   const {
     apiKey,
-    model,
     targetName,
     batchSize = 80,
     batchChars = 6000,
@@ -228,6 +229,8 @@ async function translateTexts(texts, opts) {
     contextLines = 8,
     contextAfterLines = 4,
     notes = null,
+    fallbackModel = '',
+    onFallback = () => {},
     onProgress = () => {},
     fetchImpl,
     baseUrl,
@@ -238,6 +241,9 @@ async function translateTexts(texts, opts) {
 
   const result = texts.slice();
   const batches = makeBatches(texts, { batchSize, batchChars });
+  // When the chosen model's daily free quota runs out, carry on with the fallback model
+  // (Flash-Lite has a much larger free quota) instead of leaving the episode untranslated.
+  let model = opts.model;
 
   async function runBatch(indices) {
     const items = indices.map((i) => ({ id: i, text: texts[i] }));
@@ -287,7 +293,17 @@ async function translateTexts(texts, opts) {
       try {
         await runBatch(b);
       } catch (err) {
-        if (err.fatal) fatal = err;
+        if (err.daily && fallbackModel) {
+          if (model !== fallbackModel) {
+            model = fallbackModel;
+            onFallback(fallbackModel);
+          }
+          try {
+            await runBatch(b.filter((i) => result[i] === texts[i]));
+          } catch (err2) {
+            if (err2.fatal) fatal = err2; // the fallback is out of quota too
+          }
+        } else if (err.fatal) fatal = err;
         // non-fatal errors: leave this batch untranslated, keep going
       }
     }

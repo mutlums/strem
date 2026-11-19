@@ -25,6 +25,8 @@ const SHORT_LINK_CFG = encodeConfig({});
 // Batches sent at once per translation. The per-key pacer in translator.js keeps this within the free-tier rate.
 // Model for the quick read of the whole episode before translating (GEMINI_NOTES_MODEL=off disables it).
 const NOTES_MODEL = /^(off|0|false)$/i.test(process.env.GEMINI_NOTES_MODEL || '') ? '' : (process.env.GEMINI_NOTES_MODEL || 'gemini-3.5-flash-lite').trim();
+// When the chosen model's daily free quota is used up, finish with this one (GEMINI_FALLBACK_MODEL=off disables it).
+const FALLBACK_MODEL = /^(off|0|false)$/i.test(process.env.GEMINI_FALLBACK_MODEL || '') ? '' : (process.env.GEMINI_FALLBACK_MODEL || 'gemini-3.5-flash-lite').trim();
 const NOTES_WAIT_MS = parseInt(process.env.GEMINI_NOTES_WAIT_MS, 10) || 25000;
 const CONCURRENCY = parseInt(process.env.GEMINI_CONCURRENCY, 10) || 3;
 const CINEMETA = (process.env.CINEMETA_URL || 'https://v3-cinemeta.strem.io').replace(/\/$/, '');
@@ -160,6 +162,8 @@ function startJob(srcUrl, cfg, apiKey, style = 'std') {
       texts,
       {
         notes,
+        fallbackModel: FALLBACK_MODEL && FALLBACK_MODEL !== cfg.model ? FALLBACK_MODEL : '',
+        onFallback: (m) => console.log(`daily quota of ${cfg.model} used up, continuing with ${m}`),
         apiKey,
         model: cfg.model,
         targetName,

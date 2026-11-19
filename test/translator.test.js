@@ -100,3 +100,20 @@ test('buildNotes returns notes, or null when Gemini fails', async () => {
   const throws = async () => { throw new Error('net'); };
   assert.strictEqual(await buildNotes(['Hi'], { ...base, fetchImpl: throws, rpm: 0 }), null);
 });
+
+test('switches to the fallback model when the daily quota runs out', async () => {
+  const calls = [];
+  const inner = fakeFetch();
+  const fetchImpl = async (url, init) => {
+    calls.push(url);
+    if (/3\.6-flash/.test(url)) {
+      return { ok: false, status: 429, headers: new Map(), json: async () => ({ error: { message: 'Quota exceeded for metric: generate_content_free_tier_requests, limit: 20, GenerateRequestsPerDayPerProjectPerModel' } }) };
+    }
+    return inner(url, init);
+  };
+  let switched = '';
+  const out = await translateTexts(['a', 'b', 'c'], { ...base, model: 'gemini-3.6-flash', fetchImpl, batchSize: 2, concurrency: 1, fallbackModel: 'gemini-3.5-flash-lite', onFallback: (m) => { switched = m; } });
+  assert.deepStrictEqual(out, ['TR(a)', 'TR(b)', 'TR(c)']);
+  assert.strictEqual(switched, 'gemini-3.5-flash-lite');
+  assert.strictEqual(calls.filter((u) => /3\.6-flash/.test(u)).length, 1, 'stops asking the exhausted model');
+});
