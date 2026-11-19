@@ -417,6 +417,7 @@ if (require.main === module) {
   createServer().listen(PORT, () => {
     console.log(`Gemini subtitle translator listening on http://localhost:${PORT}`);
     console.log(`Configure page: http://localhost:${PORT}/configure`);
+    console.log(`OpenRouter fallback: ${OPENROUTER_KEY && OPENROUTER_MODEL ? `on (${OPENROUTER_MODEL})` : 'off (no OPENROUTER_API_KEY)'}`);
   });
 }
 
