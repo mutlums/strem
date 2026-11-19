@@ -149,6 +149,52 @@ test('falls back to OpenRouter when every Gemini model is out of daily quota', a
   assert.match(orCalls[0].body.messages[0].content, /Turkish style/);
 });
 
+test('uses the primary OpenRouter model first', async () => {
+  const orCalls = [];
+  const gemini = fakeFetch();
+  const fetchImpl = async (url, init) => {
+    if (!/openrouter/.test(url)) return gemini(url, init);
+    const body = JSON.parse(init.body);
+    orCalls.push(body);
+    const req = JSON.parse(body.messages[1].content);
+    const lines = req.lines.map((l) => ({ id: l.id, text: `LUNA(${l.text})` }));
+    return { ok: true, status: 200, json: async () => ({ choices: [{ message: { content: JSON.stringify({ lines }) } }] }) };
+  };
+  const out = await translateTexts(['a', 'b', 'c'], {
+    ...base,
+    fetchImpl,
+    batchSize: 2,
+    primary: { provider: 'openrouter', model: 'openai/gpt-6-luna', apiKey: 'or-key', rpm: 0 },
+  });
+  assert.deepStrictEqual(out, ['LUNA(a)', 'LUNA(b)', 'LUNA(c)']);
+  assert.strictEqual(out.usedModel, 'openai/gpt-6-luna');
+  assert.strictEqual(orCalls[0].model, 'openai/gpt-6-luna');
+});
+
+test('an empty OpenRouter balance on the primary model moves on to Gemini', async () => {
+  const gemini = fakeFetch();
+  let orCalls = 0;
+  const fetchImpl = async (url, init) => {
+    if (!/openrouter/.test(url)) return gemini(url, init);
+    orCalls++;
+    return { ok: false, status: 402, headers: new Map(), json: async () => ({ error: { code: 402, message: 'Insufficient credits' } }) };
+  };
+  const switched = [];
+  const out = await translateTexts(['a', 'b', 'c'], {
+    ...base,
+    model: 'gemini-3.6-flash',
+    fetchImpl,
+    batchSize: 2,
+    concurrency: 2,
+    primary: { provider: 'openrouter', model: 'openai/gpt-6-luna', apiKey: 'or-key', rpm: 0 },
+    onFallback: (m, p) => switched.push(`${p}:${m}`),
+  });
+  assert.deepStrictEqual(out, ['TR(a)', 'TR(b)', 'TR(c)']);
+  assert.strictEqual(out.usedModel, 'gemini-3.6-flash');
+  assert.deepStrictEqual(switched, ['gemini:gemini-3.6-flash']);
+  assert.ok(orCalls <= 2);
+});
+
 test('OpenRouter daily limit is a clear fatal error', async () => {
   const fetchImpl = async () => ({ ok: false, status: 429, headers: new Map(), json: async () => ({ error: { code: 429, message: 'Rate limit exceeded: free-models-per-day' } }) });
   const { callOpenRouter } = require('../src/translator');

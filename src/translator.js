@@ -271,7 +271,7 @@ async function callOpenRouter({ apiKey, model, targetName, items, context = [], 
     }
     const detail = (errObj && errObj.message) || `OpenRouter HTTP ${status}`;
     if (status === 401 || status === 403) throw new FatalTranslationError('OpenRouter anahtarı geçersiz.', status);
-    if (status === 402) throw Object.assign(new FatalTranslationError('OpenRouter bakiyesi eksi, ücretsiz modeller kapandı.', 402), { daily: true });
+    if (status === 402) throw Object.assign(new FatalTranslationError('OpenRouter bakiyesi yetersiz.', 402), { daily: true });
     if (status === 404 && /data policy|privacy/i.test(detail)) {
       throw new FatalTranslationError('OpenRouter gizlilik ayarı ücretsiz modelleri engelliyor (Settings > Privacy).', 404);
     }
@@ -322,6 +322,7 @@ async function translateTexts(texts, opts) {
     notes = null,
     fallbackModel = '',
     fallbacks: fallbackList,
+    primary = null,
     onFallback = () => {},
     onProgress = () => {},
     fetchImpl,
@@ -335,15 +336,21 @@ async function translateTexts(texts, opts) {
   const batches = makeBatches(texts, { batchSize, batchChars });
   // When the chosen model's daily free quota runs out, carry on with the next step of the chain
   // (Gemini Flash-Lite, then OpenRouter's free models) instead of leaving the episode untranslated.
-  const steps = [{ provider: 'gemini', model: opts.model, apiKey }];
+  // A "primary" step (e.g. a paid OpenRouter model) runs before the chosen Gemini model. Any error
+  // there, like an empty balance, moves on to Gemini instead of failing the episode.
+  const steps = [];
+  if (primary && primary.model) {
+    steps.push({ provider: primary.provider || 'openrouter', model: primary.model, apiKey: primary.apiKey || apiKey, rpm: primary.rpm, soft: true });
+  }
+  steps.push({ provider: 'gemini', model: opts.model, apiKey });
   for (const f of fallbackList || (fallbackModel ? [{ model: fallbackModel }] : [])) {
-    if (f && f.model) steps.push({ provider: f.provider || 'gemini', model: f.model, apiKey: f.apiKey || apiKey });
+    if (f && f.model) steps.push({ provider: f.provider || 'gemini', model: f.model, apiKey: f.apiKey || apiKey, rpm: f.rpm });
   }
   let step = 0;
   const call = (args) => {
     const s = steps[step];
     const fn = s.provider === 'openrouter' ? callOpenRouter : callGemini;
-    return fn({ ...args, apiKey: s.apiKey, model: s.model, targetName, notes, extra, fetchImpl, retries, ...(s.provider === 'openrouter' ? {} : { baseUrl, rpm }) });
+    return fn({ ...args, apiKey: s.apiKey, model: s.model, targetName, notes, extra, fetchImpl, retries, ...(s.provider === 'openrouter' ? (s.rpm ? { rpm: s.rpm } : {}) : { baseUrl, rpm }) });
   };
 
   async function runBatch(indices) {
@@ -399,11 +406,12 @@ async function translateTexts(texts, opts) {
           await runBatch(todo);
           break;
         } catch (err) {
-          if (err.daily && usedStep + 1 < steps.length) {
-            // Out of daily quota: move to the next step (once, even with parallel workers) and redo the rest of this batch.
+          if ((err.daily || steps[usedStep].soft) && usedStep + 1 < steps.length) {
+            // Out of daily quota (or the primary step failed): move to the next step (once, even with
+            // parallel workers) and redo the rest of this batch.
             if (step === usedStep) {
               step = usedStep + 1;
-              onFallback(steps[step].model, steps[step].provider);
+              onFallback(steps[step].model, steps[step].provider, err);
             }
             continue;
           }

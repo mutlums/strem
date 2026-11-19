@@ -90,6 +90,13 @@ Gemini'nin günlük ücretsiz kotası (Flash, sonra Flash-Lite) dolunca çeviri 
 - Ücretsiz hesapta günde 50 istek var (bir bölüm 3-5 istek). Yedek sadece sunucunun kendi Gemini anahtarıyla (kısa `/tr` linki) çalışır.
 - "data policy" hatası alırsan OpenRouter'da Settings > Privacy altında ücretsiz modellere izin ver.
 
+### İlk tercih: GPT-6 Luna (ücretli)
+
+`OPENROUTER_API_KEY` varsa kısa `/tr` linki önce `openai/gpt-6-luna` ile çevirir (girişte milyon token başına 0,10 $, çıkışta 0,50 $; bir bölüm yaklaşık 1 sent). Bunun için OpenRouter hesabında bakiye olmalı. Bakiye biterse veya Luna hata verirse çeviri sırasıyla Gemini Flash, Flash-Lite ve ücretsiz OpenRouter modelleriyle devam eder.
+
+- Başka bir model için `OPENROUTER_PRIMARY_MODEL` gir, kapatmak için `off` yaz.
+- Dakikadaki istek sınırı `OPENROUTER_PRIMARY_RPM` (varsayılan 60).
+
 ## Senkron: videoya uyan altyazıyı seçme
 
 Bir altyazı eklentisi videonun kendisini görmez; oynatıcı sadece dizinin kimliğini, dosya adını ve (varsa) dosyanın OpenSubtitles parmak izini (videoHash) gönderir. Bu yüzden videonun içine gömülü altyazıyı okuyup çeviremez.

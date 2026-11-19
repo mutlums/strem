@@ -30,6 +30,9 @@ const FALLBACK_MODEL = /^(off|0|false)$/i.test(process.env.GEMINI_FALLBACK_MODEL
 // Last fallback when Gemini's free quotas are used up: OpenRouter's free models (needs OPENROUTER_API_KEY).
 // Only used with the server's own Gemini key, so people who installed with their own key never spend it.
 const OPENROUTER_KEY = (process.env.OPENROUTER_API_KEY || '').trim();
+// Paid OpenRouter model tried first on the server key; empty or "off" turns it off.
+const OPENROUTER_PRIMARY = ((process.env.OPENROUTER_PRIMARY_MODEL ?? 'openai/gpt-6-luna') + '').trim().replace(/^off$/i, '');
+const OPENROUTER_PRIMARY_RPM = parseInt(process.env.OPENROUTER_PRIMARY_RPM, 10) || 60;
 const OPENROUTER_MODEL = (process.env.OPENROUTER_MODEL || 'nvidia/nemotron-3.5-super-vl:free,google/gemma-4-31b-it:free,openrouter/free').trim();
 const NOTES_WAIT_MS = parseInt(process.env.GEMINI_NOTES_WAIT_MS, 10) || 25000;
 const CONCURRENCY = parseInt(process.env.GEMINI_CONCURRENCY, 10) || 3;
@@ -110,9 +113,14 @@ async function fetchText(url, timeoutMs = 20000) {
 
 // ---- translation jobs -------------------------------------------------------
 
-function cacheKey(srcUrl, cfg, style) {
+function usePrimary(apiKey) {
+  return Boolean(OPENROUTER_KEY && OPENROUTER_PRIMARY && apiKey === SERVER_KEY);
+}
+
+function cacheKey(srcUrl, cfg, style, apiKey) {
   const styleKey = style === 'kr' ? `kr-${cfg.hon}` : 'std';
-  return crypto.createHash('sha1').update(`${srcUrl}|${cfg.lang}|${cfg.model}|${styleKey}|v3`).digest('hex');
+  const model = usePrimary(apiKey) ? `${OPENROUTER_PRIMARY}>${cfg.model}` : cfg.model;
+  return crypto.createHash('sha1').update(`${srcUrl}|${cfg.lang}|${model}|${styleKey}|v3`).digest('hex');
 }
 
 // Is this title South Korean? Uses Cinemeta (the metadata addon Stremio/Nuvio use). Cached per title.
@@ -136,7 +144,7 @@ async function isKoreanTitle(type, id) {
 }
 
 function startJob(srcUrl, cfg, apiKey, style = 'std') {
-  const key = cacheKey(srcUrl, cfg, style);
+  const key = cacheKey(srcUrl, cfg, style, apiKey);
   if (jobs.has(key)) return jobs.get(key);
   const job = { key, cues: null, translated: null, done: false, error: null };
   job.promise = (async () => {
@@ -166,11 +174,12 @@ function startJob(srcUrl, cfg, apiKey, style = 'std') {
       texts,
       {
         notes,
+        primary: usePrimary(apiKey) ? { provider: 'openrouter', model: OPENROUTER_PRIMARY, apiKey: OPENROUTER_KEY, rpm: OPENROUTER_PRIMARY_RPM } : null,
         fallbacks: [
           ...(FALLBACK_MODEL && FALLBACK_MODEL !== cfg.model ? [{ model: FALLBACK_MODEL }] : []),
           ...(OPENROUTER_KEY && OPENROUTER_MODEL && apiKey === SERVER_KEY ? [{ provider: 'openrouter', model: OPENROUTER_MODEL, apiKey: OPENROUTER_KEY }] : []),
         ],
-        onFallback: (m, provider) => console.log(`daily quota used up, continuing with ${provider === 'openrouter' ? 'OpenRouter ' : ''}${m}`),
+        onFallback: (m, provider, err) => console.log(`${err && !err.daily ? `first choice failed (${err.status || 'error'}: ${String(err.message).slice(0, 80)})` : 'daily quota used up'}, continuing with ${provider === 'openrouter' ? 'OpenRouter ' : ''}${m}`),
         apiKey,
         model: cfg.model,
         targetName,
@@ -417,6 +426,7 @@ if (require.main === module) {
   createServer().listen(PORT, () => {
     console.log(`Gemini subtitle translator listening on http://localhost:${PORT}`);
     console.log(`Configure page: http://localhost:${PORT}/configure`);
+    console.log(`OpenRouter first choice: ${OPENROUTER_KEY && OPENROUTER_PRIMARY ? OPENROUTER_PRIMARY : 'off'}`);
     console.log(`OpenRouter fallback: ${OPENROUTER_KEY && OPENROUTER_MODEL ? `on (${OPENROUTER_MODEL})` : 'off (no OPENROUTER_API_KEY)'}`);
   });
 }
